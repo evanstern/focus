@@ -262,3 +262,15 @@ load_fixture() {
   [ "$status" -eq 0 ]
   [[ "$output" =~ "WIP: 1/5" ]]
 }
+
+@test "completions bash prints completion script" {
+  run "$FOCUS" completions bash
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "complete -F _focus focus" ]]
+}
+
+@test "completions with bad shell fails" {
+  run "$FOCUS" completions fish
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "unsupported shell" ]]
+}

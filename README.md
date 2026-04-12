@@ -11,6 +11,16 @@ make install          # installs to /usr/local/bin
 PREFIX=~/.local make install
 ```
 
+Add tab completions to your shell:
+
+```sh
+# bash — add to ~/.bashrc
+eval "$(focus completions bash)"
+
+# zsh — add to ~/.zshrc
+eval "$(focus completions zsh)"
+```
+
 ## Quick start
 
 ```sh
@@ -38,6 +48,7 @@ focus done 1                      # mark it done
 | `list [status]` | List cards, optionally filtered |
 | `init [dir]` | Create a new kanban board (default: `~/.focus/kanban`) |
 | `setup <path>` | Point focus at an existing kanban directory |
+| `completions [bash\|zsh]` | Print shell completions for eval |
 
 ## Flags
 

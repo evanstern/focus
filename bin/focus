@@ -763,6 +763,36 @@ _focus_cmd_setup() {
   echo "Config saved to: $FOCUS_CONFIG_FILE"
 }
 
+_focus_cmd_completions() {
+  local shell="${1:-bash}"
+  local script_dir
+  script_dir="$(cd "$(dirname "$0")" && pwd)"
+  local completions_dir="$script_dir/../completions"
+
+  case "$shell" in
+    bash)
+      if [[ -f "$completions_dir/focus.bash" ]]; then
+        cat "$completions_dir/focus.bash"
+      else
+        echo "error: bash completion file not found at $completions_dir/focus.bash" >&2
+        return 1
+      fi
+      ;;
+    zsh)
+      if [[ -f "$completions_dir/_focus" ]]; then
+        cat "$completions_dir/_focus"
+      else
+        echo "error: zsh completion file not found at $completions_dir/_focus" >&2
+        return 1
+      fi
+      ;;
+    *)
+      echo "error: unsupported shell: $shell (try bash or zsh)" >&2
+      return 1
+      ;;
+  esac
+}
+
 _focus_cmd_version() {
   echo "focus $FOCUS_VERSION"
 }
@@ -785,6 +815,7 @@ Commands:
   list [status]            List cards (optionally filter by status)
   init [dir]               Create a new kanban board (default: ~/.focus/kanban)
   setup <kanban-dir>       Point focus at an existing kanban directory
+  completions [bash|zsh]   Print shell completions (eval in .bashrc/.zshrc)
   version                  Show version
   help                     Show this help
 
@@ -855,6 +886,7 @@ main() {
     list)     _focus_cmd_list "${args[1]:-}" ;;
     init)     _focus_cmd_init "${args[1]:-}" ;;
     setup)    _focus_cmd_setup "${args[1]:-}" ;;
+    completions) _focus_cmd_completions "${args[1]:-}" ;;
     version|-v|--version) _focus_cmd_version ;;
     help|-h|--help) _focus_cmd_help ;;
     *)
