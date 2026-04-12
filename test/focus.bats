@@ -1,0 +1,221 @@
+#!/usr/bin/env bats
+
+setup() {
+  export FOCUS_DIR="$BATS_TEST_TMPDIR/focus"
+  export FOCUS_CONFIG_DIR="$BATS_TEST_TMPDIR/config"
+  export FOCUS_KANBAN_DIR="$FOCUS_DIR/kanban"
+  export FOCUS_INTENT_DIR="$FOCUS_CONFIG_DIR/intents"
+  export FOCUS_ENV_FILE="$FOCUS_CONFIG_DIR/env"
+  export NO_COLOR=1
+
+  mkdir -p "$FOCUS_KANBAN_DIR" "$FOCUS_CONFIG_DIR"
+  cat > "$FOCUS_ENV_FILE" << EOF
+FOCUS_KANBAN_DIR=$FOCUS_KANBAN_DIR
+EOF
+
+  FIXTURES="$BATS_TEST_DIRNAME/fixtures"
+  FOCUS="$BATS_TEST_DIRNAME/../bin/focus"
+}
+
+load_fixture() {
+  cp "$FIXTURES/$1" "$FOCUS_KANBAN_DIR/"
+}
+
+@test "version prints version string" {
+  run "$FOCUS" version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ^focus\ [0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
+@test "help exits successfully" {
+  run "$FOCUS" help
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "kanban card manager" ]]
+}
+
+@test "board shows empty board" {
+  run "$FOCUS" board
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "WIP: 0/3" ]]
+}
+
+@test "new creates a backlog card" {
+  run "$FOCUS" new "Test card" "my-project"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Created: #1" ]]
+  [ -f "$FOCUS_KANBAN_DIR/test-card.md" ]
+
+  run grep 'status: backlog' "$FOCUS_KANBAN_DIR/test-card.md"
+  [ "$status" -eq 0 ]
+
+  run grep 'project: my-project' "$FOCUS_KANBAN_DIR/test-card.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "new without title fails" {
+  run "$FOCUS" new
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "usage:" ]]
+}
+
+@test "new rejects duplicate slugs" {
+  run "$FOCUS" new "Test card"
+  [ "$status" -eq 0 ]
+  run "$FOCUS" new "Test card"
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "already exists" ]]
+}
+
+@test "show displays card details" {
+  load_fixture sample-backlog.md
+  run "$FOCUS" show 1
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Sample backlog task" ]]
+  [[ "$output" =~ "test-project" ]]
+  [[ "$output" =~ "backlog" ]]
+}
+
+@test "show by slug works" {
+  load_fixture sample-backlog.md
+  run "$FOCUS" show sample-backlog
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Sample backlog task" ]]
+}
+
+@test "show with invalid ref fails" {
+  run "$FOCUS" show 999
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "not found" ]]
+}
+
+@test "activate moves card to active" {
+  load_fixture sample-backlog.md
+  run "$FOCUS" activate 1
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Activated: 1" ]]
+
+  run grep 'status: active' "$FOCUS_KANBAN_DIR/sample-backlog.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "activate respects WIP limit" {
+  export FOCUS_WIP_LIMIT=1
+  load_fixture sample-active.md
+  load_fixture sample-backlog.md
+  run "$FOCUS" activate 1
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "WIP limit reached" ]]
+}
+
+@test "activate --force bypasses WIP limit" {
+  export FOCUS_WIP_LIMIT=1
+  load_fixture sample-active.md
+  load_fixture sample-backlog.md
+  run "$FOCUS" --force activate 1
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Activated" ]]
+}
+
+@test "park moves card to parked" {
+  load_fixture sample-active.md
+  run "$FOCUS" park 2
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Parked: 2" ]]
+
+  run grep 'status: parked' "$FOCUS_KANBAN_DIR/sample-active.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "kill moves card to killed" {
+  load_fixture sample-backlog.md
+  run "$FOCUS" kill 1
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Killed: 1" ]]
+
+  run grep 'status: killed' "$FOCUS_KANBAN_DIR/sample-backlog.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "done --force skips contract check" {
+  load_fixture sample-with-contract.md
+  run "$FOCUS" --force done 3
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Done: 3" ]]
+
+  run grep 'status: done' "$FOCUS_KANBAN_DIR/sample-with-contract.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "list shows all cards" {
+  load_fixture sample-backlog.md
+  load_fixture sample-active.md
+  run "$FOCUS" list
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Sample backlog task" ]]
+  [[ "$output" =~ "Sample active task" ]]
+}
+
+@test "list filters by status" {
+  load_fixture sample-backlog.md
+  load_fixture sample-active.md
+  run "$FOCUS" list backlog
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Sample backlog task" ]]
+  [[ ! "$output" =~ "Sample active task" ]]
+}
+
+@test "wip shows active count" {
+  load_fixture sample-active.md
+  run "$FOCUS" wip
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "WIP: 1/3" ]]
+}
+
+@test "intent sets and reads intent" {
+  unset TMUX
+  run "$FOCUS" intent "work on focus"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Intent set" ]]
+
+  run "$FOCUS" intent
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "work on focus" ]]
+}
+
+@test "new auto-increments IDs" {
+  load_fixture sample-active.md
+  run "$FOCUS" new "Third task"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "#3" ]]
+}
+
+@test "--quiet suppresses output" {
+  run "$FOCUS" --quiet new "Silent card"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ -f "$FOCUS_KANBAN_DIR/silent-card.md" ]
+}
+
+@test "--project filters board output" {
+  load_fixture sample-backlog.md
+  "$FOCUS" new "Other project task" "other-project"
+  run "$FOCUS" --project test-project list
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Sample backlog task" ]]
+  [[ ! "$output" =~ "Other project task" ]]
+}
+
+@test "unknown command fails" {
+  run "$FOCUS" nonsense
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "Unknown command" ]]
+}
+
+@test "init creates new kanban board" {
+  local init_dir="$BATS_TEST_TMPDIR/new-board"
+  run "$FOCUS" init "$init_dir"
+  [ "$status" -eq 0 ]
+  [ -d "$init_dir" ]
+  [ -f "$init_dir/getting-started.md" ]
+  [[ "$output" =~ "Initialized kanban board" ]]
+}

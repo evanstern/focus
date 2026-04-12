@@ -1,0 +1,887 @@
+#!/usr/bin/env bash
+# focus — kanban card manager for personal task tracking
+#
+# All card state lives as markdown files with YAML frontmatter.
+# This script is the ONLY interface for state transitions. Never hand-edit status fields.
+#
+# Usage:  focus <command> [args]
+# Run:    focus help
+
+set -euo pipefail
+
+FOCUS_VERSION="0.1.0"
+
+# ── Configuration ────────────────────────────────────────────
+
+FOCUS_CONFIG_DIR="${FOCUS_CONFIG_DIR:-$HOME/.config/focus}"
+FOCUS_ENV_FILE="$FOCUS_CONFIG_DIR/env"
+
+# Source user config if it exists
+[[ -f "$FOCUS_ENV_FILE" ]] && set -a && source "$FOCUS_ENV_FILE" && set +a
+
+_focus_find_repo_root() {
+  local dir="${1:-$PWD}"
+  while [[ "$dir" != "/" ]]; do
+    if [[ -d "$dir/.git" ]] || [[ -f "$dir/.git" ]]; then
+      echo "$dir"
+      return 0
+    fi
+    dir="$(dirname "$dir")"
+  done
+  return 1
+}
+
+FOCUS_WIP_LIMIT="${FOCUS_WIP_LIMIT:-3}"
+FOCUS_INTENT_DIR="${FOCUS_INTENT_DIR:-$FOCUS_CONFIG_DIR/intents}"
+FORCE=false
+QUIET=false
+COLOR_ENABLED=true
+FILTER_PROJECT=""
+FILTER_PRIORITY=""
+
+# Resolve kanban dir: env/config file wins, then fall back to current repo
+if [[ -z "${FOCUS_KANBAN_DIR:-}" ]]; then
+  REPO_ROOT="$(_focus_find_repo_root 2>/dev/null)" || true
+  if [[ -n "${REPO_ROOT:-}" ]] && [[ -d "$REPO_ROOT/docs/kanban" ]]; then
+    FOCUS_KANBAN_DIR="$REPO_ROOT/docs/kanban"
+  fi
+fi
+
+_focus_require_kanban_dir() {
+  if [[ -z "${FOCUS_KANBAN_DIR:-}" ]]; then
+    echo "error: no kanban directory configured" >&2
+    echo "" >&2
+    echo "Run one of:" >&2
+    echo "  focus init              Create a new kanban board in the current directory" >&2
+    echo "  focus setup <path>      Point focus at an existing kanban directory" >&2
+    exit 1
+  fi
+  if [[ ! -d "$FOCUS_KANBAN_DIR" ]]; then
+    echo "error: kanban directory not found: $FOCUS_KANBAN_DIR" >&2
+    echo "  Run 'focus init' or 'focus setup <path>' to configure." >&2
+    exit 1
+  fi
+}
+
+# ── Helpers ──────────────────────────────────────────────────
+
+_focus_slugify() {
+  echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//'
+}
+
+_focus_today() {
+  date +%Y-%m-%d
+}
+
+_focus_priority_rank() {
+  case "${1:-}" in
+    p0) echo 0 ;;
+    p1) echo 1 ;;
+    p2) echo 2 ;;
+    p3) echo 3 ;;
+    *)  echo 9 ;;
+  esac
+}
+
+_focus_status_order() {
+  case "${1:-}" in
+    active)  echo 0 ;;
+    backlog) echo 1 ;;
+    done)    echo 2 ;;
+    parked)  echo 3 ;;
+    killed)  echo 4 ;;
+    *)       echo 9 ;;
+  esac
+}
+
+_focus_truncate() {
+  local text="${1:-}" max="${2:-40}"
+  if (( ${#text} <= max )); then
+    printf "%s" "$text"
+  elif (( max > 3 )); then
+    printf "%s..." "${text:0:$((max - 3))}"
+  else
+    printf "%s" "${text:0:$max}"
+  fi
+}
+
+_color() {
+  local code="$1" text="$2"
+  if ! $COLOR_ENABLED || [[ -n "${NO_COLOR:-}" ]]; then
+    printf "%s" "$text"
+  else
+    printf "\033[%sm%s\033[0m" "$code" "$text"
+  fi
+}
+
+_focus_status_display() {
+  local status="$1"
+  case "$status" in
+    active)  _color "32;1" "$status" ;;
+    backlog) _color "36" "$status" ;;
+    done)    _color "90" "$status" ;;
+    parked)  _color "33" "$status" ;;
+    killed)  _color "31" "$status" ;;
+    *)       printf "%s" "$status" ;;
+  esac
+}
+
+_focus_priority_display() {
+  local priority="$1"
+  case "$priority" in
+    p0) _color "31;1" "$priority" ;;
+    p1) _color "33;1" "$priority" ;;
+    p2) _color "36" "$priority" ;;
+    p3) _color "90" "$priority" ;;
+    *)  printf "%s" "$priority" ;;
+  esac
+}
+
+_focus_read_field() {
+  local file="$1" field="$2"
+  sed -n '/^---$/,/^---$/p' "$file" | grep "^${field}:" | head -1 | sed "s/^${field}:[[:space:]]*//"
+}
+
+_focus_read_body() {
+  local file="$1"
+  awk 'BEGIN { sep = 0 } /^---$/ { sep++; next } sep >= 2 { print }' "$file"
+}
+
+_focus_read_contract_items() {
+  local file="$1"
+  local in_contract=false
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^contract: ]]; then
+      in_contract=true
+      continue
+    fi
+    if $in_contract; then
+      if [[ "$line" =~ ^[[:space:]]+-[[:space:]](.+) ]]; then
+        printf "%s\n" "${BASH_REMATCH[1]}"
+      else
+        break
+      fi
+    fi
+  done < "$file"
+}
+
+_focus_set_field() {
+  local file="$1" field="$2" value="$3"
+
+  if grep -q "^${field}:" <(sed -n '/^---$/,/^---$/p' "$file"); then
+    sed -i "s|^${field}:.*|${field}: ${value}|" "$file"
+  else
+    local line
+    line=$(grep -n "^---$" "$file" | tail -1 | cut -d: -f1)
+    sed -i "${line}i\\${field}: ${value}" "$file"
+  fi
+}
+
+_focus_card_files() {
+  local status_filter="${1:-}"
+  if [[ -z "$status_filter" ]]; then
+    find "$FOCUS_KANBAN_DIR" -maxdepth 1 -name '*.md' -type f 2>/dev/null | sort
+  else
+    for f in "$FOCUS_KANBAN_DIR"/*.md; do
+      [[ -f "$f" ]] || continue
+      local s
+      s="$(_focus_read_field "$f" "status")"
+      if [[ "$s" == "$status_filter" ]]; then
+        echo "$f"
+      fi
+    done
+  fi
+}
+
+_focus_find_by_id() {
+  local id="$1"
+  local f card_id
+  for f in "$FOCUS_KANBAN_DIR"/*.md; do
+    [[ -f "$f" ]] || continue
+    card_id="$(_focus_read_field "$f" "id")"
+    if [[ "$card_id" == "$id" ]]; then
+      echo "$f"
+      return 0
+    fi
+  done
+  echo "error: card not found: $id" >&2
+  echo "  hint: run 'focus list' to see available cards" >&2
+  return 1
+}
+
+_focus_next_id() {
+  local max_id=0
+  local f card_id
+  for f in "$FOCUS_KANBAN_DIR"/*.md; do
+    [[ -f "$f" ]] || continue
+    card_id="$(_focus_read_field "$f" "id")"
+    if [[ "$card_id" =~ ^[0-9]+$ ]] && (( card_id > max_id )); then
+      max_id=$card_id
+    fi
+  done
+  echo $((max_id + 1))
+}
+
+_focus_count_active() {
+  local count=0
+  for f in "$FOCUS_KANBAN_DIR"/*.md; do
+    [[ -f "$f" ]] || continue
+    if [[ "$(_focus_read_field "$f" "status")" == "active" ]]; then
+      ((count++))
+    fi
+  done
+  echo "$count"
+}
+
+_focus_card_path() {
+  local ref="$1"
+  if [[ "$ref" =~ ^[0-9]+$ ]]; then
+    _focus_find_by_id "$ref"
+    return $?
+  fi
+
+  local path="$FOCUS_KANBAN_DIR/${ref}.md"
+  if [[ ! -f "$path" ]]; then
+    echo "error: card not found: $ref" >&2
+    echo "  hint: run 'focus list' to see available cards" >&2
+    return 1
+  fi
+  echo "$path"
+}
+
+_focus_card_ref() {
+  local file="$1"
+  local id
+  id="$(_focus_read_field "$file" "id")"
+  if [[ -n "$id" ]]; then
+    printf "%s" "$id"
+  else
+    basename "$file" .md
+  fi
+}
+
+_focus_matches_filters() {
+  local file="$1"
+  local project priority
+  project="$(_focus_read_field "$file" "project")"
+  priority="$(_focus_read_field "$file" "priority")"
+
+  if [[ -n "$FILTER_PROJECT" ]] && [[ "$project" != "$FILTER_PROJECT" ]]; then
+    return 1
+  fi
+  if [[ -n "$FILTER_PRIORITY" ]] && [[ "$priority" != "$FILTER_PRIORITY" ]]; then
+    return 1
+  fi
+  return 0
+}
+
+_focus_sorted_files_for_status() {
+  local status_filter="$1"
+  local f priority updated id
+  for f in "$FOCUS_KANBAN_DIR"/*.md; do
+    [[ -f "$f" ]] || continue
+    [[ "$(_focus_read_field "$f" "status")" == "$status_filter" ]] || continue
+    _focus_matches_filters "$f" || continue
+    priority="$(_focus_read_field "$f" "priority")"
+    updated="$(_focus_read_field "$f" "updated")"
+    id="$(_focus_read_field "$f" "id")"
+    printf '%s\t%s\t%s\t%s\n' "$(_focus_priority_rank "$priority")" "$updated" "${id:-999999}" "$f"
+  done | sort -t $'\t' -k1,1n -k2,2r -k3,3n | while IFS=$'\t' read -r _ _ _ path; do
+    [[ -n "$path" ]] && printf "%s\n" "$path"
+  done
+}
+
+_focus_print_table_header() {
+  printf "%-4s  %-40s  %-24s  %-8s  %-8s  %-10s\n" "ID" "Title" "Project" "Status" "Priority" "Updated"
+}
+
+_focus_print_table_row() {
+  local file="$1"
+  local id title status project priority updated
+  id="$(_focus_card_ref "$file")"
+  title="$(_focus_truncate "$(_focus_read_field "$file" "title")" 40)"
+  project="$(_focus_truncate "$(_focus_read_field "$file" "project")" 24)"
+  status="$(_focus_read_field "$file" "status")"
+  priority="$(_focus_read_field "$file" "priority")"
+  updated="$(_focus_read_field "$file" "updated")"
+
+  printf "%-4s  %-40s  %-24s  " "$id" "$title" "$project"
+  printf "%-8b  %-8b  %-10s\n" "$(_focus_status_display "$status")" "$(_focus_priority_display "$priority")" "$updated"
+}
+
+_focus_print_status_section() {
+  local status="$1" label="$2"
+  local files
+  mapfile -t files < <(_focus_sorted_files_for_status "$status")
+
+  echo "$label"
+  echo "$(printf '%*s' ${#label} '' | tr ' ' '-')"
+  _focus_print_table_header
+  if (( ${#files[@]} == 0 )); then
+    echo "(none)"
+  else
+    local f
+    for f in "${files[@]}"; do
+      _focus_print_table_row "$f"
+    done
+  fi
+  echo ""
+}
+
+_focus_print_card_line() {
+  _focus_print_table_row "$1"
+}
+
+_focus_contract_status() {
+  local file="$1"
+  local total=0 checked=0
+
+  while IFS= read -r _; do
+    ((total++))
+  done < <(_focus_read_contract_items "$file")
+
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^\-[[:space:]]\[x\] ]] || [[ "$line" =~ ^\-[[:space:]]\[X\] ]]; then
+      ((checked++))
+    fi
+  done < <(_focus_read_body "$file")
+
+  if [[ $total -eq 0 ]]; then
+    echo "no contract"
+  else
+    echo "${checked}/${total}"
+  fi
+}
+
+# ── Commands ─────────────────────────────────────────────────
+
+_focus_cmd_board() {
+  _focus_require_kanban_dir
+  local active_count
+  active_count="$(_focus_count_active)"
+
+  echo "$(_color '35;1' 'Focus Board')"
+  echo "==========="
+  echo ""
+  echo "WIP: ${active_count}/${FOCUS_WIP_LIMIT} slots"
+  echo ""
+
+  _focus_print_status_section "active" "$(_color '32;1' 'ACTIVE')"
+  _focus_print_status_section "backlog" "$(_color '36' 'BACKLOG')"
+
+  # Intent
+  local session_name=""
+  if [[ -n "${TMUX:-}" ]]; then
+    session_name="$(tmux display-message -p '#S' 2>/dev/null || true)"
+  fi
+  if [[ -n "$session_name" ]] && [[ -f "$FOCUS_INTENT_DIR/${session_name}.txt" ]]; then
+    echo "SESSION INTENT: $(cat "$FOCUS_INTENT_DIR/${session_name}.txt")"
+  fi
+}
+
+_focus_cmd_new() {
+  _focus_require_kanban_dir
+  local title="${1:-}"
+  local project="${2:-}"
+
+  if [[ -z "$title" ]]; then
+    echo "usage: focus new \"title\" [project]" >&2
+    return 1
+  fi
+
+  local slug
+  slug="$(_focus_slugify "$title")"
+  local path="$FOCUS_KANBAN_DIR/${slug}.md"
+  local id
+  id="$(_focus_next_id)"
+
+  if [[ -f "$path" ]]; then
+    echo "error: card already exists: $slug" >&2
+    echo "  hint: pick a different title or edit the existing card" >&2
+    return 1
+  fi
+
+  local today
+  today="$(_focus_today)"
+
+  local project_line=""
+  [[ -n "$project" ]] && project_line="project: ${project}"
+
+  cat > "$path" << EOF
+---
+id: ${id}
+title: ${title}
+${project_line:+${project_line}
+}status: backlog
+priority: p2
+created: ${today}
+updated: ${today}
+---
+
+## Notes
+
+EOF
+
+  if ! $QUIET; then
+    echo "Created: #${id} ${slug} (backlog)"
+    echo "  Edit with: focus edit ${id}"
+  fi
+}
+
+_focus_cmd_show() {
+  _focus_require_kanban_dir
+  local ref="${1:-}"
+  if [[ -z "$ref" ]]; then
+    echo "usage: focus show <id|slug>" >&2
+    return 1
+  fi
+
+  local path
+  path="$(_focus_card_path "$ref")" || return 1
+
+  local id title project status priority created updated slug
+  id="$(_focus_read_field "$path" "id")"
+  title="$(_focus_read_field "$path" "title")"
+  project="$(_focus_read_field "$path" "project")"
+  status="$(_focus_read_field "$path" "status")"
+  priority="$(_focus_read_field "$path" "priority")"
+  created="$(_focus_read_field "$path" "created")"
+  updated="$(_focus_read_field "$path" "updated")"
+  slug="$(basename "$path" .md)"
+
+  echo "Task"
+  echo "----"
+  echo "ID:       ${id}"
+  echo "Title:    ${title}"
+  echo "Project:  ${project}"
+  echo "Status:   ${status}"
+  echo "Priority: ${priority}"
+  echo "Created:  ${created}"
+  echo "Updated:  ${updated}"
+  echo "Slug:     ${slug}"
+  echo ""
+  echo "Contract items:"
+  local found_contract=false
+  while IFS= read -r item; do
+    found_contract=true
+    echo "  - ${item}"
+  done < <(_focus_read_contract_items "$path")
+  $found_contract || echo "  (none)"
+  echo ""
+  echo "Body:"
+  _focus_read_body "$path"
+}
+
+_focus_cmd_activate() {
+  _focus_require_kanban_dir
+  local ref="${1:-}"
+  if [[ -z "$ref" ]]; then
+    echo "usage: focus activate <id|slug>" >&2
+    return 1
+  fi
+
+  local path
+  path="$(_focus_card_path "$ref")" || return 1
+  local card_ref
+  card_ref="$(_focus_card_ref "$path")"
+
+  local current_status
+  current_status="$(_focus_read_field "$path" "status")"
+  if [[ "$current_status" == "active" ]]; then
+    echo "Card is already active: $card_ref" >&2
+    return 0
+  fi
+
+  # WIP limit check
+  local active_count
+  active_count="$(_focus_count_active)"
+  if [[ $active_count -ge $FOCUS_WIP_LIMIT ]] && ! $FORCE; then
+    echo "WIP limit reached (${active_count}/${FOCUS_WIP_LIMIT})" >&2
+    echo "" >&2
+    echo "Active cards:" >&2
+    for f in "$FOCUS_KANBAN_DIR"/*.md; do
+      [[ -f "$f" ]] || continue
+      if [[ "$(_focus_read_field "$f" "status")" == "active" ]]; then
+        echo "  - $(_focus_read_field "$f" "title")" >&2
+      fi
+    done
+    echo "" >&2
+    echo "Park or finish something first, or use --force to override." >&2
+    return 1
+  fi
+
+  _focus_set_field "$path" "status" "active"
+  _focus_set_field "$path" "updated" "$(_focus_today)"
+
+  if ! $QUIET; then
+    active_count="$(_focus_count_active)"
+    echo "Activated: $card_ref (WIP: ${active_count}/${FOCUS_WIP_LIMIT})"
+  fi
+}
+
+_focus_cmd_park() {
+  _focus_require_kanban_dir
+  local ref="${1:-}"
+  if [[ -z "$ref" ]]; then
+    echo "usage: focus park <id|slug>" >&2
+    return 1
+  fi
+
+  local path
+  path="$(_focus_card_path "$ref")" || return 1
+
+  _focus_set_field "$path" "status" "parked"
+  _focus_set_field "$path" "updated" "$(_focus_today)"
+
+  if ! $QUIET; then
+    echo "Parked: $(_focus_card_ref "$path")"
+  fi
+}
+
+_focus_cmd_kill() {
+  _focus_require_kanban_dir
+  local ref="${1:-}"
+  if [[ -z "$ref" ]]; then
+    echo "usage: focus kill <id|slug>" >&2
+    return 1
+  fi
+
+  local path
+  path="$(_focus_card_path "$ref")" || return 1
+
+  _focus_set_field "$path" "status" "killed"
+  _focus_set_field "$path" "updated" "$(_focus_today)"
+
+  if ! $QUIET; then
+    echo "Killed: $(_focus_card_ref "$path")"
+  fi
+}
+
+_focus_cmd_done() {
+  _focus_require_kanban_dir
+  local ref="${1:-}"
+  if [[ -z "$ref" ]]; then
+    echo "usage: focus done <id|slug>" >&2
+    return 1
+  fi
+
+  local path
+  path="$(_focus_card_path "$ref")" || return 1
+  local card_ref
+  card_ref="$(_focus_card_ref "$path")"
+
+  # Contract check
+  local contract_items=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && contract_items+=("$line")
+  done < <(_focus_read_contract_items "$path")
+
+  if [[ ${#contract_items[@]} -gt 0 ]] && ! $FORCE; then
+    echo "Completion contract for: $card_ref"
+    echo ""
+    local all_met=true
+    for item in "${contract_items[@]}"; do
+      read -p "  [?] ${item} (y/n): " answer < /dev/tty
+      if [[ "$answer" != "y" && "$answer" != "Y" ]]; then
+        all_met=false
+      fi
+    done
+    echo ""
+    if ! $all_met; then
+      read -p "Contract incomplete. Mark done anyway? (y/n): " confirm < /dev/tty
+      if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        echo "Aborted. Card remains in current status."
+        return 1
+      fi
+    fi
+  fi
+
+  _focus_set_field "$path" "status" "done"
+  _focus_set_field "$path" "updated" "$(_focus_today)"
+
+  if ! $QUIET; then
+    echo "Done: $card_ref"
+  fi
+}
+
+_focus_cmd_edit() {
+  _focus_require_kanban_dir
+  local ref="${1:-}"
+  if [[ -z "$ref" ]]; then
+    echo "usage: focus edit <id|slug>" >&2
+    return 1
+  fi
+
+  local path
+  path="$(_focus_card_path "$ref")" || return 1
+
+  "${EDITOR:-vi}" "$path"
+
+  _focus_set_field "$path" "updated" "$(_focus_today)"
+}
+
+_focus_cmd_intent() {
+  local message="${1:-}"
+
+  mkdir -p "$FOCUS_INTENT_DIR"
+
+  local session_name="default"
+  if [[ -n "${TMUX:-}" ]]; then
+    session_name="$(tmux display-message -p '#S' 2>/dev/null || echo "default")"
+  fi
+
+  local intent_file="$FOCUS_INTENT_DIR/${session_name}.txt"
+
+  if [[ -z "$message" ]]; then
+    if [[ -f "$intent_file" ]]; then
+      echo "Session: $session_name"
+      echo "Intent:  $(cat "$intent_file")"
+    else
+      echo "No intent set for session: $session_name"
+      echo "  Set one: focus intent \"deploy voice-claude\""
+    fi
+    return 0
+  fi
+
+  echo "$message" > "$intent_file"
+
+  if [[ -n "${TMUX:-}" ]]; then
+    tmux set-environment SESSION_INTENT "$message" 2>/dev/null || true
+  fi
+
+  if ! $QUIET; then
+    echo "Intent set: $message"
+  fi
+}
+
+_focus_cmd_wip() {
+  _focus_require_kanban_dir
+  local active_count
+  active_count="$(_focus_count_active)"
+
+  echo "WIP: ${active_count}/${FOCUS_WIP_LIMIT}"
+  echo ""
+
+  if [[ $active_count -eq 0 ]]; then
+    echo "No active cards. Pick something from the backlog:"
+    echo ""
+    _focus_cmd_list "backlog"
+    return 0
+  fi
+
+  _focus_print_table_header
+  local f
+  while IFS= read -r f; do
+    [[ -n "$f" ]] && _focus_print_card_line "$f"
+  done < <(_focus_sorted_files_for_status "active")
+}
+
+_focus_cmd_list() {
+  _focus_require_kanban_dir
+  local status_filter="${1:-}"
+
+  if [[ -n "$status_filter" ]]; then
+    echo "Cards (${status_filter}):"
+    echo ""
+    _focus_print_table_header
+    local found=false
+    local f
+    while IFS= read -r f; do
+      [[ -n "$f" ]] || continue
+      _focus_print_card_line "$f"
+      found=true
+    done < <(_focus_sorted_files_for_status "$status_filter")
+    $found || echo "(none)"
+  else
+    echo "All cards:"
+    echo ""
+    _focus_print_status_section "active" "$(_color '32;1' 'ACTIVE')"
+    _focus_print_status_section "backlog" "$(_color '36' 'BACKLOG')"
+    _focus_print_status_section "done" "$(_color '90' 'DONE')"
+    _focus_print_status_section "parked" "$(_color '33' 'PARKED')"
+    _focus_print_status_section "killed" "$(_color '31' 'KILLED')"
+  fi
+}
+
+_focus_cmd_init() {
+  local target="${1:-}"
+
+  if [[ -z "$target" ]]; then
+    target="$PWD/kanban"
+  fi
+
+  if [[ -d "$target" ]]; then
+    echo "Directory already exists: $target" >&2
+    echo "  To use it: focus setup $target" >&2
+    return 1
+  fi
+
+  mkdir -p "$target"
+
+  # Write a sample card
+  local today
+  today="$(_focus_today)"
+  cat > "$target/getting-started.md" << EOF
+---
+id: 1
+title: Getting started with focus
+status: active
+priority: p1
+created: ${today}
+updated: ${today}
+contract:
+  - Read through 'focus help'
+  - Create a card with 'focus new'
+  - Complete this card with 'focus done 1'
+---
+
+## Notes
+
+Welcome to focus! This is a sample card to get you started.
+
+Each card is a markdown file with YAML frontmatter tracking its state.
+The \`focus\` command is the only interface for state transitions.
+
+Try: \`focus board\` to see your board.
+EOF
+
+  # Save config
+  mkdir -p "$FOCUS_CONFIG_DIR"
+  cat > "$FOCUS_ENV_FILE" << EOF
+FOCUS_KANBAN_DIR=${target}
+EOF
+
+  echo "Initialized kanban board: $target"
+  echo "Created sample card: getting-started"
+  echo ""
+  echo "Try: focus board"
+}
+
+_focus_cmd_setup() {
+  local kanban_dir="${1:-}"
+
+  if [[ -z "$kanban_dir" ]]; then
+    local repo_root
+    repo_root="$(_focus_find_repo_root 2>/dev/null)" || {
+      echo "error: not inside a git repo. Pass the kanban directory path:" >&2
+      echo "  focus setup /path/to/kanban" >&2
+      return 1
+    }
+    kanban_dir="$repo_root/docs/kanban"
+  fi
+
+  if [[ ! -d "$kanban_dir" ]]; then
+    echo "error: directory not found: $kanban_dir" >&2
+    echo "  To create a new board, use: focus init" >&2
+    return 1
+  fi
+
+  mkdir -p "$FOCUS_CONFIG_DIR"
+  cat > "$FOCUS_ENV_FILE" << EOF
+FOCUS_KANBAN_DIR=${kanban_dir}
+EOF
+
+  echo "Setup complete. focus will use: $kanban_dir"
+  echo "Works from any directory now."
+}
+
+_focus_cmd_version() {
+  echo "focus $FOCUS_VERSION"
+}
+
+_focus_cmd_help() {
+  cat << 'EOF'
+focus — kanban card manager
+
+Commands:
+  board                    Show the focus board (active + backlog)
+  new "title" [project]    Create a new backlog card
+  show <id|slug>           Show a structured card view
+  activate <id|slug>       Move card to active (checks WIP limit)
+  park <id|slug>           Move card to parked
+  kill <id|slug>           Move card to killed
+  done <id|slug>           Move card to done (checks contract)
+  edit <id|slug>           Open card in $EDITOR
+  intent [message]         Set or show session intent
+  wip                      Show WIP status
+  list [status]            List cards (optionally filter by status)
+  init [dir]               Create a new kanban board
+  setup [kanban-dir]       Point focus at an existing kanban directory
+  version                  Show version
+  help                     Show this help
+
+Flags:
+  --force    Bypass WIP limit and contract checks
+  --quiet    Suppress non-essential output
+  --project  Filter board/list output by project
+  --priority Filter board/list output by priority (p0-p3)
+  --no-color Disable color output (or set NO_COLOR)
+
+Statuses: backlog, active, done, parked, killed
+
+Numeric IDs are the primary task reference.
+Slugs still map to filenames and continue to work.
+
+Configuration:
+  FOCUS_WIP_LIMIT     Max active cards (default: 3)
+  FOCUS_KANBAN_DIR    Card directory
+  FOCUS_INTENT_DIR    Intent storage (default: ~/.config/focus/intents)
+  FOCUS_CONFIG_DIR    Config directory (default: ~/.config/focus)
+EOF
+}
+
+# ── Main Dispatcher ──────────────────────────────────────────
+
+main() {
+  local args=()
+  local i=1
+  while [[ $i -le $# ]]; do
+    local arg="${!i}"
+    case "$arg" in
+      --force) FORCE=true ;;
+      --quiet) QUIET=true ;;
+      --no-color) COLOR_ENABLED=false ;;
+      --project)
+        ((i++))
+        [[ $i -le $# ]] || { echo "error: --project requires a value" >&2; return 1; }
+        FILTER_PROJECT="${!i}"
+        ;;
+      --priority)
+        ((i++))
+        [[ $i -le $# ]] || { echo "error: --priority requires a value" >&2; return 1; }
+        FILTER_PRIORITY="${!i}"
+        ;;
+      *)
+        args+=("$arg")
+        ;;
+    esac
+    ((i++))
+  done
+
+  local cmd="${args[0]:-board}"
+
+  case "$cmd" in
+    board)    _focus_cmd_board ;;
+    new)      _focus_cmd_new "${args[1]:-}" "${args[2]:-}" ;;
+    show)     _focus_cmd_show "${args[1]:-}" ;;
+    activate) _focus_cmd_activate "${args[1]:-}" ;;
+    park)     _focus_cmd_park "${args[1]:-}" ;;
+    kill)     _focus_cmd_kill "${args[1]:-}" ;;
+    done)     _focus_cmd_done "${args[1]:-}" ;;
+    edit)     _focus_cmd_edit "${args[1]:-}" ;;
+    intent)   _focus_cmd_intent "${args[1]:-}" ;;
+    wip)      _focus_cmd_wip ;;
+    list)     _focus_cmd_list "${args[1]:-}" ;;
+    init)     _focus_cmd_init "${args[1]:-}" ;;
+    setup)    _focus_cmd_setup "${args[1]:-}" ;;
+    version|-v|--version) _focus_cmd_version ;;
+    help|-h|--help) _focus_cmd_help ;;
+    *)
+      echo "Unknown command: $cmd" >&2
+      echo "Run 'focus help' for usage." >&2
+      return 1
+      ;;
+  esac
+}
+
+main "$@"
