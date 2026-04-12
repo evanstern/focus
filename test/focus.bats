@@ -1,17 +1,12 @@
 #!/usr/bin/env bats
 
 setup() {
-  export FOCUS_DIR="$BATS_TEST_TMPDIR/focus"
-  export FOCUS_CONFIG_DIR="$BATS_TEST_TMPDIR/config"
-  export FOCUS_KANBAN_DIR="$FOCUS_DIR/kanban"
-  export FOCUS_INTENT_DIR="$FOCUS_CONFIG_DIR/intents"
-  export FOCUS_ENV_FILE="$FOCUS_CONFIG_DIR/env"
+  export FOCUS_HOME="$BATS_TEST_TMPDIR/.focus"
+  export FOCUS_KANBAN_DIR="$FOCUS_HOME/kanban"
+  export FOCUS_INTENT_DIR="$FOCUS_HOME/intents"
   export NO_COLOR=1
 
-  mkdir -p "$FOCUS_KANBAN_DIR" "$FOCUS_CONFIG_DIR"
-  cat > "$FOCUS_ENV_FILE" << EOF
-FOCUS_KANBAN_DIR=$FOCUS_KANBAN_DIR
-EOF
+  mkdir -p "$FOCUS_KANBAN_DIR"
 
   FIXTURES="$BATS_TEST_DIRNAME/fixtures"
   FOCUS="$BATS_TEST_DIRNAME/../bin/focus"
@@ -218,4 +213,52 @@ load_fixture() {
   [ -d "$init_dir" ]
   [ -f "$init_dir/getting-started.md" ]
   [[ "$output" =~ "Initialized kanban board" ]]
+}
+
+@test "init writes yaml config" {
+  local init_dir="$BATS_TEST_TMPDIR/yaml-board"
+  run "$FOCUS" init "$init_dir"
+  [ "$status" -eq 0 ]
+  [ -f "$FOCUS_HOME/config" ]
+  run grep "^kanban_dir: $init_dir" "$FOCUS_HOME/config"
+  [ "$status" -eq 0 ]
+}
+
+@test "setup writes yaml config" {
+  local dir="$BATS_TEST_TMPDIR/existing-board"
+  mkdir -p "$dir"
+  run "$FOCUS" setup "$dir"
+  [ "$status" -eq 0 ]
+  [ -f "$FOCUS_HOME/config" ]
+  run grep "^kanban_dir: $dir" "$FOCUS_HOME/config"
+  [ "$status" -eq 0 ]
+}
+
+@test "setup without args fails" {
+  run "$FOCUS" setup
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "usage:" ]]
+}
+
+@test "config kanban_dir is used when env not set" {
+  unset FOCUS_KANBAN_DIR
+  local custom_dir="$BATS_TEST_TMPDIR/custom-kanban"
+  mkdir -p "$custom_dir"
+  mkdir -p "$FOCUS_HOME"
+  printf 'kanban_dir: %s\n' "$custom_dir" > "$FOCUS_HOME/config"
+
+  run "$FOCUS" board
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "WIP: 0/" ]]
+}
+
+@test "config wip_limit is respected" {
+  unset FOCUS_WIP_LIMIT
+  mkdir -p "$FOCUS_HOME"
+  printf 'wip_limit: 5\nkanban_dir: %s\n' "$FOCUS_KANBAN_DIR" > "$FOCUS_HOME/config"
+  load_fixture sample-active.md
+
+  run "$FOCUS" wip
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "WIP: 1/5" ]]
 }

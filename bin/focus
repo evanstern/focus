@@ -13,52 +13,47 @@ FOCUS_VERSION="0.1.0"
 
 # ── Configuration ────────────────────────────────────────────
 
-FOCUS_CONFIG_DIR="${FOCUS_CONFIG_DIR:-$HOME/.config/focus}"
-FOCUS_ENV_FILE="$FOCUS_CONFIG_DIR/env"
+FOCUS_HOME="${FOCUS_HOME:-$HOME/.focus}"
+FOCUS_CONFIG_FILE="$FOCUS_HOME/config"
 
-# Source user config if it exists
-[[ -f "$FOCUS_ENV_FILE" ]] && set -a && source "$FOCUS_ENV_FILE" && set +a
-
-_focus_find_repo_root() {
-  local dir="${1:-$PWD}"
-  while [[ "$dir" != "/" ]]; do
-    if [[ -d "$dir/.git" ]] || [[ -f "$dir/.git" ]]; then
-      echo "$dir"
-      return 0
-    fi
-    dir="$(dirname "$dir")"
-  done
-  return 1
+_focus_read_config() {
+  local key="$1"
+  [[ -f "$FOCUS_CONFIG_FILE" ]] || return 1
+  sed -n "s/^${key}:[[:space:]]*//p" "$FOCUS_CONFIG_FILE" | head -1
 }
 
+_focus_write_config() {
+  local key="$1" value="$2"
+  mkdir -p "$FOCUS_HOME"
+  if [[ -f "$FOCUS_CONFIG_FILE" ]] && grep -q "^${key}:" "$FOCUS_CONFIG_FILE"; then
+    sed -i "s|^${key}:.*|${key}: ${value}|" "$FOCUS_CONFIG_FILE"
+  elif [[ -f "$FOCUS_CONFIG_FILE" ]]; then
+    printf '%s: %s\n' "$key" "$value" >> "$FOCUS_CONFIG_FILE"
+  else
+    printf '%s: %s\n' "$key" "$value" > "$FOCUS_CONFIG_FILE"
+  fi
+}
+
+FOCUS_KANBAN_DIR="${FOCUS_KANBAN_DIR:-$(_focus_read_config kanban_dir || true)}"
+FOCUS_KANBAN_DIR="${FOCUS_KANBAN_DIR:-$FOCUS_HOME/kanban}"
+
+FOCUS_WIP_LIMIT="${FOCUS_WIP_LIMIT:-$(_focus_read_config wip_limit || true)}"
 FOCUS_WIP_LIMIT="${FOCUS_WIP_LIMIT:-3}"
-FOCUS_INTENT_DIR="${FOCUS_INTENT_DIR:-$FOCUS_CONFIG_DIR/intents}"
+
+FOCUS_INTENT_DIR="${FOCUS_INTENT_DIR:-$FOCUS_HOME/intents}"
 FORCE=false
 QUIET=false
 COLOR_ENABLED=true
 FILTER_PROJECT=""
 FILTER_PRIORITY=""
 
-# Resolve kanban dir: env/config file wins, then fall back to current repo
-if [[ -z "${FOCUS_KANBAN_DIR:-}" ]]; then
-  REPO_ROOT="$(_focus_find_repo_root 2>/dev/null)" || true
-  if [[ -n "${REPO_ROOT:-}" ]] && [[ -d "$REPO_ROOT/docs/kanban" ]]; then
-    FOCUS_KANBAN_DIR="$REPO_ROOT/docs/kanban"
-  fi
-fi
-
 _focus_require_kanban_dir() {
-  if [[ -z "${FOCUS_KANBAN_DIR:-}" ]]; then
-    echo "error: no kanban directory configured" >&2
-    echo "" >&2
-    echo "Run one of:" >&2
-    echo "  focus init              Create a new kanban board in the current directory" >&2
-    echo "  focus setup <path>      Point focus at an existing kanban directory" >&2
-    exit 1
-  fi
   if [[ ! -d "$FOCUS_KANBAN_DIR" ]]; then
     echo "error: kanban directory not found: $FOCUS_KANBAN_DIR" >&2
-    echo "  Run 'focus init' or 'focus setup <path>' to configure." >&2
+    echo "" >&2
+    echo "Run one of:" >&2
+    echo "  focus init              Create the default board at ~/.focus/kanban" >&2
+    echo "  focus setup <path>      Point focus at an existing kanban directory" >&2
     exit 1
   fi
 }
@@ -704,11 +699,7 @@ _focus_cmd_list() {
 }
 
 _focus_cmd_init() {
-  local target="${1:-}"
-
-  if [[ -z "$target" ]]; then
-    target="$PWD/kanban"
-  fi
+  local target="${1:-$FOCUS_HOME/kanban}"
 
   if [[ -d "$target" ]]; then
     echo "Directory already exists: $target" >&2
@@ -718,7 +709,6 @@ _focus_cmd_init() {
 
   mkdir -p "$target"
 
-  # Write a sample card
   local today
   today="$(_focus_today)"
   cat > "$target/getting-started.md" << EOF
@@ -745,11 +735,7 @@ The \`focus\` command is the only interface for state transitions.
 Try: \`focus board\` to see your board.
 EOF
 
-  # Save config
-  mkdir -p "$FOCUS_CONFIG_DIR"
-  cat > "$FOCUS_ENV_FILE" << EOF
-FOCUS_KANBAN_DIR=${target}
-EOF
+  _focus_write_config kanban_dir "$target"
 
   echo "Initialized kanban board: $target"
   echo "Created sample card: getting-started"
@@ -761,13 +747,8 @@ _focus_cmd_setup() {
   local kanban_dir="${1:-}"
 
   if [[ -z "$kanban_dir" ]]; then
-    local repo_root
-    repo_root="$(_focus_find_repo_root 2>/dev/null)" || {
-      echo "error: not inside a git repo. Pass the kanban directory path:" >&2
-      echo "  focus setup /path/to/kanban" >&2
-      return 1
-    }
-    kanban_dir="$repo_root/docs/kanban"
+    echo "usage: focus setup <path-to-kanban-dir>" >&2
+    return 1
   fi
 
   if [[ ! -d "$kanban_dir" ]]; then
@@ -776,13 +757,10 @@ _focus_cmd_setup() {
     return 1
   fi
 
-  mkdir -p "$FOCUS_CONFIG_DIR"
-  cat > "$FOCUS_ENV_FILE" << EOF
-FOCUS_KANBAN_DIR=${kanban_dir}
-EOF
+  _focus_write_config kanban_dir "$kanban_dir"
 
   echo "Setup complete. focus will use: $kanban_dir"
-  echo "Works from any directory now."
+  echo "Config saved to: $FOCUS_CONFIG_FILE"
 }
 
 _focus_cmd_version() {
@@ -805,8 +783,8 @@ Commands:
   intent [message]         Set or show session intent
   wip                      Show WIP status
   list [status]            List cards (optionally filter by status)
-  init [dir]               Create a new kanban board
-  setup [kanban-dir]       Point focus at an existing kanban directory
+  init [dir]               Create a new kanban board (default: ~/.focus/kanban)
+  setup <kanban-dir>       Point focus at an existing kanban directory
   version                  Show version
   help                     Show this help
 
@@ -822,11 +800,14 @@ Statuses: backlog, active, done, parked, killed
 Numeric IDs are the primary task reference.
 Slugs still map to filenames and continue to work.
 
-Configuration:
-  FOCUS_WIP_LIMIT     Max active cards (default: 3)
-  FOCUS_KANBAN_DIR    Card directory
-  FOCUS_INTENT_DIR    Intent storage (default: ~/.config/focus/intents)
-  FOCUS_CONFIG_DIR    Config directory (default: ~/.config/focus)
+Configuration (~/.focus/config):
+  kanban_dir    Card directory (default: ~/.focus/kanban)
+  wip_limit     Max active cards (default: 3)
+
+Environment overrides:
+  FOCUS_HOME        Base directory (default: ~/.focus)
+  FOCUS_KANBAN_DIR  Card directory
+  FOCUS_WIP_LIMIT   Max active cards
 EOF
 }
 

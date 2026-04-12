@@ -36,8 +36,8 @@ focus done 1                      # mark it done
 | `intent [message]` | Set/show session intent (tmux-aware) |
 | `wip` | Show WIP status |
 | `list [status]` | List cards, optionally filtered |
-| `init [dir]` | Create a new kanban board |
-| `setup [path]` | Point focus at an existing kanban directory |
+| `init [dir]` | Create a new kanban board (default: `~/.focus/kanban`) |
+| `setup <path>` | Point focus at an existing kanban directory |
 
 ## Flags
 
@@ -72,14 +72,29 @@ Implementation details go here.
 
 ## Configuration
 
+All state lives under `~/.focus/` by default:
+
+```
+~/.focus/
+  config          # YAML config file
+  kanban/         # card files (default board location)
+  intents/        # session intent files
+```
+
+The config file (`~/.focus/config`) is YAML:
+
+```yaml
+kanban_dir: /path/to/your/kanban
+wip_limit: 3
+```
+
+Environment variables override config file values:
+
 | Variable | Default | Description |
 |---|---|---|
+| `FOCUS_HOME` | `~/.focus` | Base directory for all focus data |
+| `FOCUS_KANBAN_DIR` | `~/.focus/kanban` | Card directory |
 | `FOCUS_WIP_LIMIT` | `3` | Max active cards |
-| `FOCUS_KANBAN_DIR` | (from setup/init) | Card directory |
-| `FOCUS_CONFIG_DIR` | `~/.config/focus` | Config directory |
-| `FOCUS_INTENT_DIR` | `~/.config/focus/intents` | Intent storage |
-
-Persistent config lives in `~/.config/focus/env`.
 
 ## Tests
 

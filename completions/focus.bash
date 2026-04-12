@@ -22,9 +22,10 @@ _focus() {
       # Complete with card slugs (filenames without .md)
       local kanban_dir
       kanban_dir="${FOCUS_KANBAN_DIR:-}"
-      if [[ -z "$kanban_dir" ]] && [[ -f "${FOCUS_CONFIG_DIR:-$HOME/.config/focus}/env" ]]; then
-        kanban_dir=$(grep '^FOCUS_KANBAN_DIR=' "${FOCUS_CONFIG_DIR:-$HOME/.config/focus}/env" | cut -d= -f2)
+      if [[ -z "$kanban_dir" ]] && [[ -f "${FOCUS_HOME:-$HOME/.focus}/config" ]]; then
+        kanban_dir=$(sed -n 's/^kanban_dir:[[:space:]]*//p' "${FOCUS_HOME:-$HOME/.focus}/config" | head -1)
       fi
+      kanban_dir="${kanban_dir:-${FOCUS_HOME:-$HOME/.focus}/kanban}"
       if [[ -n "$kanban_dir" ]] && [[ -d "$kanban_dir" ]]; then
         local slugs
         slugs=$(find "$kanban_dir" -maxdepth 1 -name '*.md' -exec basename {} .md \;)
