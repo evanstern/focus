@@ -765,26 +765,118 @@ _focus_cmd_setup() {
 
 _focus_cmd_completions() {
   local shell="${1:-bash}"
-  local script_dir
-  script_dir="$(cd "$(dirname "$0")" && pwd)"
-  local completions_dir="$script_dir/../completions"
-
   case "$shell" in
     bash)
-      if [[ -f "$completions_dir/focus.bash" ]]; then
-        cat "$completions_dir/focus.bash"
-      else
-        echo "error: bash completion file not found at $completions_dir/focus.bash" >&2
-        return 1
+      cat << 'BASH_COMPLETION'
+_focus() {
+  local cur prev commands statuses
+  COMPREPLY=()
+  cur="${COMP_WORDS[COMP_CWORD]}"
+  prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+  commands="board new show activate park kill done edit intent wip list init setup completions version help"
+  statuses="active backlog done parked killed"
+
+  case "$prev" in
+    focus)
+      COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
+      return 0
+      ;;
+    list)
+      COMPREPLY=( $(compgen -W "$statuses" -- "$cur") )
+      return 0
+      ;;
+    show|activate|park|kill|done|edit)
+      local kanban_dir
+      kanban_dir="${FOCUS_KANBAN_DIR:-}"
+      if [[ -z "$kanban_dir" ]] && [[ -f "${FOCUS_HOME:-$HOME/.focus}/config" ]]; then
+        kanban_dir=$(sed -n 's/^kanban_dir:[[:space:]]*//p' "${FOCUS_HOME:-$HOME/.focus}/config" | head -1)
       fi
+      kanban_dir="${kanban_dir:-${FOCUS_HOME:-$HOME/.focus}/kanban}"
+      if [[ -n "$kanban_dir" ]] && [[ -d "$kanban_dir" ]]; then
+        local slugs
+        slugs=$(find "$kanban_dir" -maxdepth 1 -name '*.md' -exec basename {} .md \;)
+        COMPREPLY=( $(compgen -W "$slugs" -- "$cur") )
+      fi
+      return 0
+      ;;
+    --project|--priority)
+      return 0
+      ;;
+  esac
+
+  if [[ "$cur" == -* ]]; then
+    COMPREPLY=( $(compgen -W "--force --quiet --no-color --project --priority" -- "$cur") )
+    return 0
+  fi
+}
+
+complete -F _focus focus
+BASH_COMPLETION
       ;;
     zsh)
-      if [[ -f "$completions_dir/_focus" ]]; then
-        cat "$completions_dir/_focus"
-      else
-        echo "error: zsh completion file not found at $completions_dir/_focus" >&2
-        return 1
-      fi
+      cat << 'ZSH_COMPLETION'
+#compdef focus
+
+_focus() {
+  local -a commands statuses
+  commands=(
+    'board:Show the focus board (active + backlog)'
+    'new:Create a new backlog card'
+    'show:Show a structured card view'
+    'activate:Move card to active'
+    'park:Move card to parked'
+    'kill:Move card to killed'
+    'done:Move card to done'
+    'edit:Open card in $EDITOR'
+    'intent:Set or show session intent'
+    'wip:Show WIP status'
+    'list:List cards'
+    'init:Create a new kanban board'
+    'setup:Point focus at an existing kanban directory'
+    'completions:Print shell completions'
+    'version:Show version'
+    'help:Show help'
+  )
+  statuses=('active' 'backlog' 'done' 'parked' 'killed')
+
+  _arguments -C \
+    '--force[Bypass WIP limit and contract checks]' \
+    '--quiet[Suppress non-essential output]' \
+    '--no-color[Disable color output]' \
+    '--project[Filter by project]:project:' \
+    '--priority[Filter by priority]:priority:(p0 p1 p2 p3)' \
+    '1:command:->cmd' \
+    '2:argument:->arg'
+
+  case $state in
+    cmd)
+      _describe 'command' commands
+      ;;
+    arg)
+      case ${words[2]} in
+        list)
+          _describe 'status' statuses
+          ;;
+        show|activate|park|kill|done|edit)
+          local kanban_dir="${FOCUS_KANBAN_DIR:-}"
+          if [[ -z "$kanban_dir" ]] && [[ -f "${FOCUS_HOME:-$HOME/.focus}/config" ]]; then
+            kanban_dir=$(sed -n 's/^kanban_dir:[[:space:]]*//p' "${FOCUS_HOME:-$HOME/.focus}/config" | head -1)
+          fi
+          kanban_dir="${kanban_dir:-${FOCUS_HOME:-$HOME/.focus}/kanban}"
+          if [[ -n "$kanban_dir" ]] && [[ -d "$kanban_dir" ]]; then
+            local -a slugs
+            slugs=(${(f)"$(find "$kanban_dir" -maxdepth 1 -name '*.md' -exec basename {} .md \;)"})
+            _describe 'card' slugs
+          fi
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_focus "$@"
+ZSH_COMPLETION
       ;;
     *)
       echo "error: unsupported shell: $shell (try bash or zsh)" >&2
