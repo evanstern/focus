@@ -63,9 +63,16 @@ _focus_complete_cards() {
     descriptions+=("$desc")
   done <<< "$sorted"
 
-  COMPREPLY=( $(compgen -W "${ids[*]}" -- "$cur") )
+  if [[ -n "$cur" ]]; then
+    local id
+    for id in "${ids[@]}"; do
+      [[ "$id" == "$cur"* ]] && COMPREPLY+=("$id")
+    done
+  else
+    COMPREPLY=("${ids[@]}")
+  fi
 
-  if (( ${#COMPREPLY[@]} > 1 || ( ${#COMPREPLY[@]} == 1 && -z "$cur" ) )); then
+  if (( ${#COMPREPLY[@]} > 1 )) || { (( ${#COMPREPLY[@]} == 1 )) && [[ -z "$cur" ]]; }; then
     printf '\n' >&2
     printf '%-4s  %-40s  %-24s  %-8s  %s\n' 'ID' 'Title' 'Project' 'Status' 'Priority' >&2
     local desc
