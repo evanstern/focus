@@ -47,9 +47,26 @@ _focus() {
           fi
           kanban_dir="${kanban_dir:-${FOCUS_HOME:-$HOME/.focus}/kanban}"
           if [[ -n "$kanban_dir" ]] && [[ -d "$kanban_dir" ]]; then
-            local -a slugs
-            slugs=(${(f)"$(find "$kanban_dir" -maxdepth 1 -name '*.md' -exec basename {} .md \;)"})
-            _describe 'card' slugs
+            local -a cards
+            local cmd=${words[2]}
+            local f id title project status priority
+            for f in "$kanban_dir"/*.md(N); do
+              id=$(sed -n '/^---$/,/^---$/p' "$f" | grep '^id:' | head -1 | sed 's/^id:[[:space:]]*//')
+              [[ -n "$id" ]] || continue
+              status=$(sed -n '/^---$/,/^---$/p' "$f" | grep '^status:' | head -1 | sed 's/^status:[[:space:]]*//')
+              case "$cmd" in
+                activate) [[ "$status" == "backlog" ]] || continue ;;
+                park)     [[ "$status" == "active" ]] || continue ;;
+                done)     [[ "$status" == "active" ]] || continue ;;
+                kill)     [[ "$status" == "backlog" || "$status" == "active" || "$status" == "parked" ]] || continue ;;
+                show|edit) ;;
+              esac
+              title=$(sed -n '/^---$/,/^---$/p' "$f" | grep '^title:' | head -1 | sed 's/^title:[[:space:]]*//')
+              project=$(sed -n '/^---$/,/^---$/p' "$f" | grep '^project:' | head -1 | sed 's/^project:[[:space:]]*//')
+              priority=$(sed -n '/^---$/,/^---$/p' "$f" | grep '^priority:' | head -1 | sed 's/^priority:[[:space:]]*//')
+              cards+=("${id}:${title} [${project:-none}] ${status} ${priority}")
+            done
+            _describe 'card' cards
           fi
           ;;
       esac
