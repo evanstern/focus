@@ -1345,7 +1345,7 @@ _focus_tui_draw_status_bar() {
     printf '%s' "$_tui_search_buf"
     _focus_tui_color '90' '  Enter:done  Esc:clear'
   else
-    _focus_tui_color '90' ' j/k:move  h/l:tab  a:act  p:park  d:done  K:kill  e:edit  n:new  /:find  q:quit'
+    _focus_tui_color '90' ' j/k:move  h/l:tab  a:act  p:park  d:done  K:kill  e:edit  n:new  r:reload  /:find  q:quit'
   fi
 }
 
@@ -1805,6 +1805,14 @@ _focus_cmd_tui() {
       /)
         _tui_search_mode=true
         _tui_search_buf=''
+        _focus_tui_full_draw
+        ;;
+      r)
+        # Reload all data and re-render
+        _focus_tui_load_cards
+        (( _tui_cursor >= ${#_tui_cards[@]} && ${#_tui_cards[@]} > 0 )) && _tui_cursor=$(( ${#_tui_cards[@]} - 1 ))
+        _tui_message='Reloaded'
+        _tui_message_ttl=2
         _focus_tui_full_draw
         ;;
       escape)
