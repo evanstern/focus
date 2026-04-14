@@ -16,6 +16,7 @@ _focus() {
     'list:List cards'
     'init:Create a new kanban board'
     'setup:Point focus at an existing kanban directory'
+    'tui:Interactive terminal UI'
     'completions:Print shell completions'
     'version:Show version'
     'help:Show help'
