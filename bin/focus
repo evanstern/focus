@@ -1031,11 +1031,12 @@ EOF
 _focus_tui_statuses=(active backlog done parked killed)
 
 _focus_tui_cleanup() {
-  # Restore terminal
-  tput rmcup 2>/dev/null || true
-  [[ -n "${_tui_saved_stty:-}" ]] && stty "$_tui_saved_stty" 2>/dev/null || true
-  tput cnorm 2>/dev/null || true
+  # Restore terminal — order matters: stty first, then screen buffer
+  [[ -n "${_tui_saved_stty:-}" ]] && stty "$_tui_saved_stty" 2>/dev/null || stty sane 2>/dev/null || true
   printf '\033[0m'
+  tput cnorm 2>/dev/null || true
+  tput rmcup 2>/dev/null || true
+  printf '\n'
 }
 
 _focus_tui_color() {
@@ -1100,7 +1101,13 @@ _focus_tui_draw_header() {
   tput cup 0 0
   _focus_tui_color '1;7' " ${title}"
   printf '%*s' "$right_pad" ''
-  _focus_tui_color '1;7' "${wip_text} "
+  if (( active_count > FOCUS_WIP_LIMIT )); then
+    _focus_tui_color '1;7;31' "${wip_text} "
+  elif (( active_count == FOCUS_WIP_LIMIT )); then
+    _focus_tui_color '1;7;33' "${wip_text} "
+  else
+    _focus_tui_color '1;7' "${wip_text} "
+  fi
   printf '\033[0m'
 }
 
@@ -1112,7 +1119,7 @@ _focus_tui_draw_tabs() {
     local label
     label="$(echo "${_focus_tui_statuses[$i]}" | tr '[:lower:]' '[:upper:]')"
     if (( i == _tui_tab )); then
-      _focus_tui_color '1;7' " ${label} "
+      _focus_tui_color '1;4' " ${label} "
     else
       case "${_focus_tui_statuses[$i]}" in
         active)  _focus_tui_color '32' " ${label} " ;;
@@ -1223,11 +1230,16 @@ _focus_tui_draw_detail() {
   local cols="$1" detail_start="$2" detail_height="$3"
   local count=${#_tui_cards[@]}
 
-  # Draw separator
+  # Draw separator with status label
   tput cup "$detail_start" 0
-  local sep
-  sep=$(printf '%*s' "$cols" '' | tr ' ' '─')
-  _focus_tui_color '90' "$sep"
+  local status_label
+  status_label="$(echo "${_focus_tui_statuses[$_tui_tab]}" | tr '[:lower:]' '[:upper:]')"
+  local sep_label="── ${status_label} (${count}) "
+  local sep_rest
+  local sep_rest_len=$(( cols - ${#sep_label} ))
+  (( sep_rest_len < 0 )) && sep_rest_len=0
+  sep_rest=$(printf '%*s' "$sep_rest_len" '' | tr ' ' '─')
+  _focus_tui_color '90' "${sep_label}${sep_rest}"
 
   local content_start=$(( detail_start + 1 ))
   local content_height=$(( detail_height - 1 ))
@@ -1261,7 +1273,12 @@ _focus_tui_draw_detail() {
   # Line 2: Project
   tput cup $(( content_start + 1 )) 1
   tput el
-  printf 'Project:  %s' "$project"
+  if [[ -n "$project" ]]; then
+    printf 'Project:  %s' "$project"
+  else
+    printf 'Project:  '
+    _focus_tui_color '90' '(none)'
+  fi
 
   # Line 3: Priority / Status / Updated
   tput cup $(( content_start + 2 )) 1
@@ -1315,7 +1332,7 @@ _focus_tui_draw_status_bar() {
   local cols="$1" rows="$2"
   tput cup $(( rows - 2 )) 0
   local sep
-  sep=$(printf '%*s' "$cols" '' | tr ' ' '─')
+  sep=$(printf '%*s' "$cols" '' | tr ' ' '═')
   _focus_tui_color '90' "$sep"
 
   tput cup $(( rows - 1 )) 0
@@ -1326,9 +1343,9 @@ _focus_tui_draw_status_bar() {
   elif $_tui_search_mode; then
     _focus_tui_color '33' ' /'
     printf '%s' "$_tui_search_buf"
-    _focus_tui_color '90' '  Enter:search  Esc:cancel'
+    _focus_tui_color '90' '  Enter:done  Esc:clear'
   else
-    _focus_tui_color '90' ' ↑↓:navigate  ←→:tab  a:activate  p:park  d:done  K:kill  e:edit  n:new  /:search  q:quit'
+    _focus_tui_color '90' ' j/k:move  h/l:tab  a:act  p:park  d:done  K:kill  e:edit  n:new  /:find  q:quit'
   fi
 }
 
@@ -1352,7 +1369,7 @@ _focus_tui_full_draw() {
   # Layout: header=1, blank=1, tabs=1, blank=1, card_list, separator=1, detail, separator=1, statusbar=1
   local list_start=4
   local footer_lines=2  # separator + status bar
-  local detail_height=$(( (rows - list_start - footer_lines) * 35 / 100 ))
+  local detail_height=$(( (rows - list_start - footer_lines) * 50 / 100 ))
   (( detail_height < 5 )) && detail_height=5
   local list_height=$(( rows - list_start - detail_height - footer_lines ))
   (( list_height < 3 )) && list_height=3
@@ -1378,7 +1395,7 @@ _focus_tui_partial_draw() {
 
   local list_start=4
   local footer_lines=2
-  local detail_height=$(( (rows - list_start - footer_lines) * 35 / 100 ))
+  local detail_height=$(( (rows - list_start - footer_lines) * 50 / 100 ))
   (( detail_height < 5 )) && detail_height=5
   local list_height=$(( rows - list_start - detail_height - footer_lines ))
   (( list_height < 3 )) && list_height=3
@@ -1415,6 +1432,12 @@ _focus_tui_read_key() {
     echo 'enter'
   elif [[ "$c" == $'\t' ]]; then
     echo 'tab'
+  elif [[ "$c" == $'\x03' ]]; then
+    echo 'ctrl-c'
+  elif [[ "$c" == $'\x04' ]]; then
+    echo 'ctrl-d'
+  elif [[ "$c" == $'\x15' ]]; then
+    echo 'ctrl-u'
   elif [[ "$c" == $'\x7f' ]] || [[ "$c" == $'\b' ]]; then
     echo 'backspace'
   else
@@ -1487,29 +1510,38 @@ _focus_cmd_tui() {
     if $_tui_search_mode; then
       case "$key" in
         enter)
-          _tui_search="$_tui_search_buf"
+          # Commit search and exit search mode
           _tui_search_mode=false
-          _tui_search_buf=''
-          _tui_cursor=0
-          _tui_scroll=0
-          _focus_tui_load_cards
           _focus_tui_full_draw
           ;;
         escape)
+          # Cancel search, clear filter
           _tui_search_mode=false
           _tui_search_buf=''
+          _tui_search=''
+          _tui_cursor=0
+          _tui_scroll=0
+          _focus_tui_load_cards
           _focus_tui_full_draw
           ;;
         backspace)
           if [[ -n "$_tui_search_buf" ]]; then
             _tui_search_buf="${_tui_search_buf%?}"
           fi
+          _tui_search="$_tui_search_buf"
+          _tui_cursor=0
+          _tui_scroll=0
+          _focus_tui_load_cards
           _focus_tui_full_draw
           ;;
         *)
           if [[ ${#key} -eq 1 ]] && [[ "$key" =~ [[:print:]] ]]; then
             _tui_search_buf+="$key"
           fi
+          _tui_search="$_tui_search_buf"
+          _tui_cursor=0
+          _tui_scroll=0
+          _focus_tui_load_cards
           _focus_tui_full_draw
           ;;
       esac
@@ -1517,7 +1549,7 @@ _focus_cmd_tui() {
     fi
 
     case "$key" in
-      q)
+      q|ctrl-c)
         _tui_running=false
         ;;
       up|k)
@@ -1529,6 +1561,44 @@ _focus_cmd_tui() {
       down|j)
         if (( _tui_cursor < ${#_tui_cards[@]} - 1 )); then
           (( ++_tui_cursor ))
+          _focus_tui_partial_draw
+        fi
+        ;;
+      G)
+        # Jump to bottom
+        if (( ${#_tui_cards[@]} > 0 )); then
+          _tui_cursor=$(( ${#_tui_cards[@]} - 1 ))
+          _focus_tui_partial_draw
+        fi
+        ;;
+      g)
+        # gg = jump to top
+        local g2
+        IFS= read -rsn1 -t 0.3 g2 2>/dev/null || g2=''
+        if [[ "$g2" == 'g' ]]; then
+          _tui_cursor=0
+          _tui_scroll=0
+          _focus_tui_partial_draw
+        fi
+        ;;
+      ctrl-d)
+        # Half-page down
+        if (( ${#_tui_cards[@]} > 0 )); then
+          local half=$(( _tui_list_height / 2 ))
+          (( half < 1 )) && half=1
+          _tui_cursor=$(( _tui_cursor + half ))
+          local max=$(( ${#_tui_cards[@]} - 1 ))
+          (( _tui_cursor > max )) && _tui_cursor=$max
+          _focus_tui_partial_draw
+        fi
+        ;;
+      ctrl-u)
+        # Half-page up
+        if (( ${#_tui_cards[@]} > 0 )); then
+          local half=$(( _tui_list_height / 2 ))
+          (( half < 1 )) && half=1
+          _tui_cursor=$(( _tui_cursor - half ))
+          (( _tui_cursor < 0 )) && _tui_cursor=0
           _focus_tui_partial_draw
         fi
         ;;
@@ -1599,15 +1669,30 @@ _focus_cmd_tui() {
         fi
         ;;
       K)
-        # Kill selected card
+        # Kill selected card (requires confirmation)
         if (( ${#_tui_cards[@]} > 0 && _tui_cursor < ${#_tui_cards[@]} )); then
           local card_id="${_tui_card_ids[$_tui_cursor]}"
-          local result
-          result="$(QUIET=true _focus_cmd_kill "$card_id" 2>&1)" && \
-            _tui_message="Killed: ${card_id}" || _tui_message="$result"
-          _tui_message_ttl=3
-          _focus_tui_load_cards
-          (( _tui_cursor >= ${#_tui_cards[@]} && ${#_tui_cards[@]} > 0 )) && _tui_cursor=$(( ${#_tui_cards[@]} - 1 ))
+          local card_title="${_tui_card_titles[$_tui_cursor]}"
+          local cols rows
+          cols=$(tput cols)
+          rows=$(tput lines)
+          tput cup $(( rows - 1 )) 0
+          tput el
+          _focus_tui_color '31;1' " Kill #${card_id} ${card_title}? "
+          _focus_tui_color '90' 'y:confirm  any:cancel'
+          local confirm_key
+          confirm_key="$(_focus_tui_read_key)" || confirm_key=''
+          if [[ "$confirm_key" == 'y' ]]; then
+            local result
+            result="$(QUIET=true _focus_cmd_kill "$card_id" 2>&1)" && \
+              _tui_message="Killed: ${card_id}" || _tui_message="$result"
+            _tui_message_ttl=3
+            _focus_tui_load_cards
+            (( _tui_cursor >= ${#_tui_cards[@]} && ${#_tui_cards[@]} > 0 )) && _tui_cursor=$(( ${#_tui_cards[@]} - 1 ))
+          else
+            _tui_message='Kill cancelled'
+            _tui_message_ttl=2
+          fi
           _focus_tui_full_draw
         fi
         ;;
@@ -1615,6 +1700,7 @@ _focus_cmd_tui() {
         # Edit in $EDITOR
         if (( ${#_tui_cards[@]} > 0 && _tui_cursor < ${#_tui_cards[@]} )); then
           local file="${_tui_card_files[$_tui_cursor]}"
+          local edit_id="${_tui_card_ids[$_tui_cursor]}"
           # Restore terminal for editor
           tput rmcup
           stty "$_tui_saved_stty"
@@ -1626,38 +1712,91 @@ _focus_cmd_tui() {
           tput smcup
           tput civis
           _focus_tui_load_cards
+          # Restore cursor to the edited card
+          local _ei
+          _tui_cursor=0
+          for _ei in "${!_tui_card_ids[@]}"; do
+            if [[ "${_tui_card_ids[$_ei]}" == "$edit_id" ]]; then
+              _tui_cursor=$_ei
+              break
+            fi
+          done
           _focus_tui_full_draw
         fi
         ;;
       n)
-        # Inline new card creation — prompt in status bar
+        # Inline new card creation u2014 raw-mode prompts with Esc-to-cancel
+        local _new_buf='' _new_phase='title' _new_title='' _new_cancelled=false
         local cols rows
         cols=$(tput cols)
         rows=$(tput lines)
         tput cup $(( rows - 1 )) 0
         tput el
-        printf ' Title: '
-        # Restore cooked mode for readline
-        stty "$_tui_saved_stty"
+        _focus_tui_color '33' ' New title: '
+        _focus_tui_color '90' ' Esc:cancel'
         tput cnorm
-        local new_title=''
-        IFS= read -r new_title < /dev/tty
-        stty raw -echo
+
+        while true; do
+          local nk
+          nk="$(_focus_tui_read_key)" || continue
+          case "$nk" in
+            escape)
+              _new_cancelled=true
+              break
+              ;;
+            enter)
+              if [[ "$_new_phase" == 'title' ]]; then
+                if [[ -z "$_new_buf" ]]; then
+                  _new_cancelled=true
+                  break
+                fi
+                _new_title="$_new_buf"
+                _new_buf=''
+                _new_phase='project'
+                tput cup $(( rows - 1 )) 0
+                tput el
+                _focus_tui_color '33' ' Project (optional): '
+                _focus_tui_color '90' ' Esc:cancel  Enter:skip'
+              else
+                break
+              fi
+              ;;
+            backspace)
+              if [[ -n "$_new_buf" ]]; then
+                _new_buf="${_new_buf%?}"
+                tput cup $(( rows - 1 )) 0
+                tput el
+                if [[ "$_new_phase" == 'title' ]]; then
+                  _focus_tui_color '33' ' New title: '
+                else
+                  _focus_tui_color '33' ' Project (optional): '
+                fi
+                printf '%s' "$_new_buf"
+                _focus_tui_color '90' '  Esc:cancel'
+              fi
+              ;;
+            *)
+              if [[ ${#nk} -eq 1 ]] && [[ "$nk" =~ [[:print:]] ]]; then
+                _new_buf+="$nk"
+                tput cup $(( rows - 1 )) 0
+                tput el
+                if [[ "$_new_phase" == 'title' ]]; then
+                  _focus_tui_color '33' ' New title: '
+                else
+                  _focus_tui_color '33' ' Project (optional): '
+                fi
+                printf '%s' "$_new_buf"
+                _focus_tui_color '90' '  Esc:cancel'
+              fi
+              ;;
+          esac
+        done
+
         tput civis
-        if [[ -n "$new_title" ]]; then
-          # Ask for project
-          tput cup $(( rows - 1 )) 0
-          tput el
-          printf ' Project (optional): '
-          stty "$_tui_saved_stty"
-          tput cnorm
-          local new_project=''
-          IFS= read -r new_project < /dev/tty
-          stty raw -echo
-          tput civis
+        if ! $_new_cancelled && [[ -n "$_new_title" ]]; then
           local result
-          result="$(QUIET=true _focus_cmd_new "$new_title" "$new_project" 2>&1)" && \
-            _tui_message="Created: ${new_title}" || _tui_message="$result"
+          result="$(QUIET=true _focus_cmd_new "$_new_title" "$_new_buf" 2>&1)" && \
+            _tui_message="Created: ${_new_title}" || _tui_message="$result"
           _tui_message_ttl=3
           _focus_tui_load_cards
         fi
@@ -1671,6 +1810,7 @@ _focus_cmd_tui() {
       escape)
         if [[ -n "$_tui_search" ]]; then
           _tui_search=''
+          _tui_search_buf=''
           _tui_cursor=0
           _tui_scroll=0
           _focus_tui_load_cards
@@ -1680,8 +1820,8 @@ _focus_cmd_tui() {
     esac
   done
 
-  _focus_tui_cleanup
   trap - EXIT INT TERM WINCH
+  _focus_tui_cleanup
 }
 
 # ── Main Dispatcher ──────────────────────────────────────────
