@@ -274,3 +274,35 @@ load_fixture() {
   [ "$status" -eq 1 ]
   [[ "$output" =~ "unsupported shell" ]]
 }
+
+# ── TUI tests ────────────────────────────────────────────────
+
+@test "tui without terminal errors gracefully" {
+  run "$FOCUS" tui < /dev/null
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "interactive terminal" ]]
+}
+
+@test "tui is a recognized command" {
+  # Piped stdin makes it fail, but NOT as 'Unknown command'
+  run "$FOCUS" tui < /dev/null
+  [[ ! "$output" =~ "Unknown command" ]]
+}
+
+@test "help includes tui command" {
+  run "$FOCUS" help
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "tui" ]]
+}
+
+@test "bash completions include tui" {
+  run "$FOCUS" completions bash
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "tui" ]]
+}
+
+@test "zsh completions include tui" {
+  run "$FOCUS" completions zsh
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "tui" ]]
+}

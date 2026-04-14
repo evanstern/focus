@@ -89,7 +89,7 @@ _focus() {
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-  commands="board new show activate park kill done edit intent wip list init setup completions version help"
+  commands="board new show activate park kill done edit intent wip list tui init setup completions version help"
   statuses="active backlog done parked killed"
 
   case "$prev" in

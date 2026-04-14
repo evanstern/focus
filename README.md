@@ -48,6 +48,7 @@ focus done 1                      # mark it done
 | `list [status]` | List cards, optionally filtered |
 | `init [dir]` | Create a new kanban board (default: `~/.focus/kanban`) |
 | `setup <path>` | Point focus at an existing kanban directory |
+| `tui` | Interactive terminal UI (navigate, search, transition cards) |
 | `completions [bash\|zsh]` | Print shell completions for eval |
 
 ## Flags
