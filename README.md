@@ -108,6 +108,54 @@ Environment variables override config file values:
 | `FOCUS_KANBAN_DIR` | `~/.focus/kanban` | Card directory |
 | `FOCUS_WIP_LIMIT` | `3` | Max active cards |
 
+## Coda plugin
+
+Focus integrates with [coda](https://github.com/evanstern/coda) as a plugin via coda's plugin system. This adds:
+
+- **`coda focus <command>`** — all focus commands accessible as a coda subcommand
+- **MCP tools** — OpenCode agents can manage kanban cards (board, new, show, activate, done, park, kill, list, wip, intent)
+- **Lifecycle hooks** — auto-sets focus intent when a feature branch is created, clears it on teardown
+
+### Install
+
+```sh
+coda plugin install <this-repo-url>
+```
+
+Or if working from a local clone:
+
+```sh
+mkdir -p ~/.config/coda/plugins
+ln -s /path/to/focus ~/.config/coda/plugins/focus
+```
+
+Then add to `~/.config/coda/config.json`:
+
+```json
+{
+  "plugins": {
+    "<this-repo-url>": { "enabled": true }
+  }
+}
+```
+
+### Usage via coda
+
+```sh
+coda focus                # show the board
+coda focus new "Fix bug"  # create a card
+coda focus activate 1     # start working
+coda focus done 1         # mark done
+```
+
+All focus commands and flags pass through.
+
+### Uninstall
+
+```sh
+coda plugin remove focus
+```
+
 ## Tests
 
 ```sh

@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+command -v focus &>/dev/null || exit 0
+focus intent "${CODA_PROJECT_NAME}: ${CODA_FEATURE_BRANCH}" --quiet 2>/dev/null || true
