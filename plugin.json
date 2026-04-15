@@ -49,6 +49,11 @@
         "function": "_coda_focus_intent"
       }
     },
+    "completions": {
+      "focus": {
+        "subcommands": "board new show activate park kill done edit intent wip list tui init setup help"
+      }
+    },
     "hooks": {
       "post-feature-create": ["hooks/post-feature-create/*"],
       "pre-feature-teardown": ["hooks/pre-feature-teardown/*"]
