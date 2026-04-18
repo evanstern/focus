@@ -306,3 +306,17 @@ load_fixture() {
   [ "$status" -eq 0 ]
   [[ "$output" =~ "tui" ]]
 }
+
+@test "edit in non-TTY prints card path and exits 0" {
+  load_fixture sample-backlog.md
+  run "$FOCUS" edit 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == "$FOCUS_KANBAN_DIR/sample-backlog.md" ]]
+}
+
+@test "edit in non-TTY prints valid file path" {
+  load_fixture sample-backlog.md
+  run "$FOCUS" edit sample-backlog
+  [ "$status" -eq 0 ]
+  [ -f "$output" ]
+}

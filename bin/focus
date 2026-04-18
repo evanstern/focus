@@ -610,6 +610,11 @@ _focus_cmd_edit() {
   local path
   path="$(_focus_card_path "$ref")" || return 1
 
+  if [[ ! -t 0 || ! -t 1 ]]; then
+    echo "$path"
+    return 0
+  fi
+
   "${EDITOR:-vi}" "$path"
 
   _focus_set_field "$path" "updated" "$(_focus_today)"
