@@ -93,3 +93,60 @@ _coda_focus_intent() {
         focus intent
     fi
 }
+
+_coda_focus_milestone_new() {
+    _coda_focus_require || return 1
+    local title="" project=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --title)   title="$2"; shift 2 ;;
+            --project) project="$2"; shift 2 ;;
+            *)         shift ;;
+        esac
+    done
+    if [[ -z "$title" ]]; then
+        echo "error: --title is required" >&2
+        return 1
+    fi
+    local args=("milestone" "new" "$title")
+    [[ -n "$project" ]] && args+=("$project")
+    focus "${args[@]}"
+}
+
+_coda_focus_milestone_show() {
+    _coda_focus_require || return 1
+    local ref=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --ref) ref="$2"; shift 2 ;;
+            *)     shift ;;
+        esac
+    done
+    if [[ -z "$ref" ]]; then
+        echo "error: --ref is required" >&2
+        return 1
+    fi
+    focus milestone "$ref" --no-color
+}
+
+_coda_focus_milestone_list() {
+    _coda_focus_require || return 1
+    focus milestone list --no-color
+}
+
+_coda_focus_milestone_add() {
+    _coda_focus_require || return 1
+    local milestone="" card=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --milestone) milestone="$2"; shift 2 ;;
+            --card)      card="$2"; shift 2 ;;
+            *)           shift ;;
+        esac
+    done
+    if [[ -z "$milestone" ]] || [[ -z "$card" ]]; then
+        echo "error: --milestone and --card are required" >&2
+        return 1
+    fi
+    focus milestone add "$milestone" "$card"
+}

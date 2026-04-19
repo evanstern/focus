@@ -36,7 +36,11 @@ focus done 1                      # mark it done
 | Command | Description |
 |---|---|
 | `board` | Show active + backlog cards |
-| `new "title" [project]` | Create a backlog card |
+| `new "title" [project]` | Create a backlog card (add `--type milestone` for a milestone) |
+| `milestone <id>` | Show milestone detail with progress + children |
+| `milestone new "title" [project]` | Shortcut for creating a milestone card |
+| `milestone list` | List milestones with progress summaries |
+| `milestone add <mid> <cid>` | Link a card to a milestone |
 | `show <id\|slug>` | Show card details |
 | `activate <id\|slug>` | Move to active (enforces WIP limit) |
 | `park <id\|slug>` | Move to parked |
@@ -81,6 +85,24 @@ contract:
 
 Implementation details go here.
 ```
+
+## Milestones
+
+A milestone is a card with `type: milestone`. Regular cards link up via a
+`milestone: <id>` frontmatter field — one card, one milestone, no nesting.
+Milestones support cross-project work: children can have any `project:` value.
+
+```sh
+focus milestone new "Launch v2" web        # create a milestone
+focus new "Ship backend" api               # create a regular card
+focus milestone add 1 2                    # link card #2 to milestone #1
+focus milestone 1                          # show progress and children
+focus milestone list                       # summary of all milestones
+```
+
+`focus done <milestone-id>` blocks if any child is still `active` or
+`backlog`; use `--force` to override. `focus board` shows an additional
+`MILESTONES` section grouping active/backlog children under their milestone.
 
 ## Configuration
 

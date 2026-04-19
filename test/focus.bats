@@ -334,3 +334,185 @@ load_fixture() {
   updated_after="$(grep '^updated:' "$FOCUS_KANBAN_DIR/sample-backlog.md")"
   [ "$updated_after" = "$updated_before" ]
 }
+
+# ── Milestone tests ──────────────────────────────────────────
+
+@test "new --type milestone sets type field" {
+  run "$FOCUS" new "Big ship" "web" --type milestone
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "milestone" ]]
+  run grep '^type: milestone' "$FOCUS_KANBAN_DIR/big-ship.md"
+  [ "$status" -eq 0 ]
+  run grep '^status: backlog' "$FOCUS_KANBAN_DIR/big-ship.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "new --type with unknown value fails" {
+  run "$FOCUS" new "Thing" --type epic
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "unknown type" ]]
+}
+
+@test "milestone new is shortcut for --type milestone" {
+  run "$FOCUS" milestone new "Release 1" "web"
+  [ "$status" -eq 0 ]
+  run grep '^type: milestone' "$FOCUS_KANBAN_DIR/release-1.md"
+  [ "$status" -eq 0 ]
+  run grep '^project: web' "$FOCUS_KANBAN_DIR/release-1.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "milestone new without title fails" {
+  run "$FOCUS" milestone new
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "usage:" ]]
+}
+
+@test "milestone add links card to milestone" {
+  "$FOCUS" milestone new "Launch" "web"
+  "$FOCUS" new "Ship it" "web"
+  run "$FOCUS" milestone add 1 2
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Linked" ]]
+  run grep '^milestone: 1' "$FOCUS_KANBAN_DIR/ship-it.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "milestone add rejects non-milestone parent" {
+  "$FOCUS" new "Regular" "web"
+  "$FOCUS" new "Child" "web"
+  run "$FOCUS" milestone add 1 2
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "not a milestone" ]]
+}
+
+@test "milestone add rejects nesting milestones" {
+  "$FOCUS" milestone new "Outer" "web"
+  "$FOCUS" milestone new "Inner" "web"
+  run "$FOCUS" milestone add 1 2
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "nest" ]]
+}
+
+@test "milestone <id> shows progress" {
+  "$FOCUS" milestone new "Launch" "web"
+  "$FOCUS" new "Task A" "web"
+  "$FOCUS" new "Task B" "web"
+  "$FOCUS" milestone add 1 2
+  "$FOCUS" milestone add 1 3
+  "$FOCUS" --force done 2
+  run "$FOCUS" milestone 1
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Milestone" ]]
+  [[ "$output" =~ "Progress:" ]]
+  [[ "$output" =~ "1/2" ]]
+  [[ "$output" =~ "Children:" ]]
+  [[ "$output" =~ "Task A" ]]
+  [[ "$output" =~ "Task B" ]]
+}
+
+@test "milestone <id> rejects non-milestone" {
+  "$FOCUS" new "Regular" "web"
+  run "$FOCUS" milestone 1
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "not a milestone" ]]
+}
+
+@test "milestone list shows all milestones with progress" {
+  "$FOCUS" milestone new "Alpha" "web"
+  "$FOCUS" milestone new "Beta" "web"
+  "$FOCUS" new "Task" "web"
+  "$FOCUS" milestone add 1 3
+  run "$FOCUS" milestone list
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Alpha" ]]
+  [[ "$output" =~ "Beta" ]]
+  [[ "$output" =~ "0/1" ]]
+  [[ "$output" =~ "0/0" ]]
+}
+
+@test "milestone list empty shows none message" {
+  run "$FOCUS" milestone list
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "no milestones" ]]
+}
+
+@test "done on milestone with unfinished children blocks" {
+  "$FOCUS" milestone new "Launch" "web"
+  "$FOCUS" new "Child" "web"
+  "$FOCUS" milestone add 1 2
+  run "$FOCUS" done 1
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "unfinished child" ]]
+}
+
+@test "done --force on milestone bypasses child check" {
+  "$FOCUS" milestone new "Launch" "web"
+  "$FOCUS" new "Child" "web"
+  "$FOCUS" milestone add 1 2
+  run "$FOCUS" --force done 1
+  [ "$status" -eq 0 ]
+  run grep '^status: done' "$FOCUS_KANBAN_DIR/launch.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "done on milestone with all children done succeeds" {
+  "$FOCUS" milestone new "Launch" "web"
+  "$FOCUS" new "Child" "web"
+  "$FOCUS" milestone add 1 2
+  "$FOCUS" --force done 2
+  run "$FOCUS" done 1
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Done: 1" ]]
+}
+
+@test "done on empty milestone succeeds" {
+  "$FOCUS" milestone new "Launch" "web"
+  run "$FOCUS" done 1
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Done: 1" ]]
+}
+
+@test "show on child card displays milestone context" {
+  "$FOCUS" milestone new "Launch" "web"
+  "$FOCUS" new "Child task" "web"
+  "$FOCUS" milestone add 1 2
+  run "$FOCUS" show 2
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Milestone: #1 Launch" ]]
+}
+
+@test "show on milestone displays progress and children" {
+  "$FOCUS" milestone new "Launch" "web"
+  "$FOCUS" new "Child" "web"
+  "$FOCUS" milestone add 1 2
+  run "$FOCUS" show 1
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Milestone" ]]
+  [[ "$output" =~ "Progress:" ]]
+  [[ "$output" =~ "Children:" ]]
+  [[ "$output" =~ "Child" ]]
+}
+
+@test "cross-project milestone groups children with different projects" {
+  "$FOCUS" milestone new "Big initiative" "cross-project"
+  "$FOCUS" new "Backend task" "api"
+  "$FOCUS" new "Frontend task" "web"
+  "$FOCUS" milestone add 1 2
+  "$FOCUS" milestone add 1 3
+  run "$FOCUS" milestone 1
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "2/2" ]] || [[ "$output" =~ "0/2" ]]
+  [[ "$output" =~ "Backend task" ]]
+  [[ "$output" =~ "Frontend task" ]]
+}
+
+@test "board groups active milestones" {
+  "$FOCUS" milestone new "Launch" "web"
+  "$FOCUS" new "Child" "web"
+  "$FOCUS" milestone add 1 2
+  run "$FOCUS" board
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "MILESTONES" ]]
+  [[ "$output" =~ "Launch" ]]
+}
