@@ -502,7 +502,7 @@ load_fixture() {
   "$FOCUS" milestone add 1 3
   run "$FOCUS" milestone 1
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "2/2" ]] || [[ "$output" =~ "0/2" ]]
+  [[ "$output" =~ "0/2" ]]
   [[ "$output" =~ "Backend task" ]]
   [[ "$output" =~ "Frontend task" ]]
 }

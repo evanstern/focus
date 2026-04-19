@@ -222,7 +222,7 @@
       },
       "coda_focus_milestone_list": {
         "description": "List all focus milestones with progress summaries",
-        "command": ["focus", "milestone", "list", "--no-color"]
+        "command": ["focus-milestone-list"]
       },
       "coda_focus_milestone_add": {
         "description": "Link a focus card to a milestone by setting its milestone field",
