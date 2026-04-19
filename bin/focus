@@ -327,6 +327,49 @@ _focus_print_card_line() {
   _focus_print_table_row "$1"
 }
 
+_focus_print_milestone_section() {
+  local milestones=()
+  local f
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    milestones+=("$f")
+  done < <(_focus_milestone_files)
+
+  (( ${#milestones[@]} > 0 )) || return 0
+
+  local label
+  label="$(_color '35;1' 'MILESTONES')"
+  echo "$label"
+  echo "----------"
+  local m id title status counts total active_c backlog_c done_c parked_c killed_c pct
+  for m in "${milestones[@]}"; do
+    id="$(_focus_read_field "$m" "id")"
+    title="$(_focus_truncate "$(_focus_read_field "$m" "title")" 40)"
+    status="$(_focus_read_field "$m" "status")"
+    [[ "$status" == "done" || "$status" == "killed" ]] && continue
+    counts="$(_focus_milestone_counts "$id")"
+    read -r total active_c backlog_c done_c parked_c killed_c <<< "$counts"
+    pct=0
+    (( total > 0 )) && pct=$(( done_c * 100 / total ))
+    printf '  #%-4s %-40s  %b  %d/%d (%d%%)\n' "$id" "$title" "$(_focus_status_display "$status")" "$done_c" "$total" "$pct"
+
+    # Children under this milestone
+    local c cstatus ctitle cid cproject
+    while IFS= read -r c; do
+      [[ -n "$c" ]] || continue
+      cstatus="$(_focus_read_field "$c" "status")"
+      [[ "$cstatus" == "active" || "$cstatus" == "backlog" ]] || continue
+      cid="$(_focus_read_field "$c" "id")"
+      ctitle="$(_focus_truncate "$(_focus_read_field "$c" "title")" 38)"
+      cproject="$(_focus_read_field "$c" "project")"
+      printf '      [%-7s] #%-4s %s' "$cstatus" "$cid" "$ctitle"
+      [[ -n "$cproject" ]] && printf '  (%s)' "$cproject"
+      printf '\n'
+    done < <(_focus_milestone_children "$id")
+  done
+  echo ""
+}
+
 _focus_contract_status() {
   local file="$1"
   local total=0 checked=0
@@ -348,6 +391,62 @@ _focus_contract_status() {
   fi
 }
 
+# ── Milestone helpers ────────────────────────────────────────
+
+_focus_is_milestone() {
+  local file="$1"
+  [[ "$(_focus_read_field "$file" "type")" == "milestone" ]]
+}
+
+_focus_require_milestone() {
+  local file="$1"
+  if ! _focus_is_milestone "$file"; then
+    local ref
+    ref="$(_focus_card_ref "$file")"
+    echo "error: card is not a milestone: $ref" >&2
+    return 1
+  fi
+}
+
+# Prints file paths of child cards for a milestone id.
+_focus_milestone_children() {
+  local milestone_id="$1"
+  local f mid
+  for f in "$FOCUS_KANBAN_DIR"/*.md; do
+    [[ -f "$f" ]] || continue
+    mid="$(_focus_read_field "$f" "milestone")"
+    [[ "$mid" == "$milestone_id" ]] && echo "$f"
+  done
+}
+
+# Prints counts: total active backlog done parked killed (space-separated)
+_focus_milestone_counts() {
+  local milestone_id="$1"
+  local total=0 active=0 backlog=0 done=0 parked=0 killed=0
+  local f s
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    ((++total))
+    s="$(_focus_read_field "$f" "status")"
+    case "$s" in
+      active)  ((++active)) ;;
+      backlog) ((++backlog)) ;;
+      done)    ((++done)) ;;
+      parked)  ((++parked)) ;;
+      killed)  ((++killed)) ;;
+    esac
+  done < <(_focus_milestone_children "$milestone_id")
+  printf '%s %s %s %s %s %s\n' "$total" "$active" "$backlog" "$done" "$parked" "$killed"
+}
+
+_focus_milestone_files() {
+  local f
+  for f in "$FOCUS_KANBAN_DIR"/*.md; do
+    [[ -f "$f" ]] || continue
+    _focus_is_milestone "$f" && echo "$f"
+  done
+}
+
 # ── Commands ─────────────────────────────────────────────────
 
 _focus_cmd_board() {
@@ -364,6 +463,8 @@ _focus_cmd_board() {
   _focus_print_status_section "active" "$(_color '32;1' 'ACTIVE')"
   _focus_print_status_section "backlog" "$(_color '36' 'BACKLOG')"
 
+  _focus_print_milestone_section
+
   # Intent
   local session_name=""
   if [[ -n "${TMUX:-}" ]]; then
@@ -376,11 +477,35 @@ _focus_cmd_board() {
 
 _focus_cmd_new() {
   _focus_require_kanban_dir
-  local title="${1:-}"
-  local project="${2:-}"
+  local title=""
+  local project=""
+  local type=""
+  local positional=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --type)
+        [[ $# -ge 2 ]] || { echo "error: --type requires a value" >&2; return 1; }
+        type="$2"
+        shift 2
+        ;;
+      *)
+        positional+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  title="${positional[0]:-}"
+  project="${positional[1]:-}"
 
   if [[ -z "$title" ]]; then
-    echo "usage: focus new \"title\" [project]" >&2
+    echo "usage: focus new \"title\" [project] [--type milestone]" >&2
+    return 1
+  fi
+
+  if [[ -n "$type" ]] && [[ "$type" != "milestone" ]]; then
+    echo "error: unknown type: $type (supported: milestone)" >&2
     return 1
   fi
 
@@ -401,24 +526,27 @@ _focus_cmd_new() {
 
   local project_line=""
   [[ -n "$project" ]] && project_line="project: ${project}"
+  local type_line=""
+  [[ -n "$type" ]] && type_line="type: ${type}"
 
-  cat > "$path" << EOF
----
-id: ${id}
-title: ${title}
-${project_line:+${project_line}
-}status: backlog
-priority: p2
-created: ${today}
-updated: ${today}
----
-
-## Notes
-
-EOF
+  {
+    printf '%s\n' '---'
+    printf 'id: %s\n' "$id"
+    printf 'title: %s\n' "$title"
+    [[ -n "$type_line" ]] && printf '%s\n' "$type_line"
+    [[ -n "$project_line" ]] && printf '%s\n' "$project_line"
+    printf 'status: backlog\n'
+    printf 'priority: p2\n'
+    printf 'created: %s\n' "$today"
+    printf 'updated: %s\n' "$today"
+    printf '%s\n' '---'
+    printf '\n## Notes\n\n'
+  } > "$path"
 
   if ! $QUIET; then
-    echo "Created: #${id} ${slug} (backlog)"
+    local label="backlog"
+    [[ "$type" == "milestone" ]] && label="milestone, backlog"
+    echo "Created: #${id} ${slug} (${label})"
     echo "  Edit with: focus edit ${id}"
   fi
 }
@@ -434,7 +562,7 @@ _focus_cmd_show() {
   local path
   path="$(_focus_card_path "$ref")" || return 1
 
-  local id title project status priority created updated slug
+  local id title project status priority created updated slug type milestone_id
   id="$(_focus_read_field "$path" "id")"
   title="$(_focus_read_field "$path" "title")"
   project="$(_focus_read_field "$path" "project")"
@@ -442,18 +570,40 @@ _focus_cmd_show() {
   priority="$(_focus_read_field "$path" "priority")"
   created="$(_focus_read_field "$path" "created")"
   updated="$(_focus_read_field "$path" "updated")"
+  type="$(_focus_read_field "$path" "type")"
+  milestone_id="$(_focus_read_field "$path" "milestone")"
   slug="$(basename "$path" .md)"
 
-  echo "Task"
-  echo "----"
+  local heading="Task"
+  [[ "$type" == "milestone" ]] && heading="Milestone"
+  echo "$heading"
+  echo "$(printf '%*s' ${#heading} '' | tr ' ' '-')"
   echo "ID:       ${id}"
   echo "Title:    ${title}"
+  [[ "$type" == "milestone" ]] && echo "Type:     milestone"
   echo "Project:  ${project}"
   echo "Status:   ${status}"
   echo "Priority: ${priority}"
   echo "Created:  ${created}"
   echo "Updated:  ${updated}"
   echo "Slug:     ${slug}"
+  if [[ -n "$milestone_id" ]]; then
+    local mpath mtitle
+    if mpath="$(_focus_find_by_id "$milestone_id" 2>/dev/null)"; then
+      mtitle="$(_focus_read_field "$mpath" "title")"
+      echo "Milestone: #${milestone_id} ${mtitle}"
+    else
+      echo "Milestone: #${milestone_id} (not found)"
+    fi
+  fi
+  if [[ "$type" == "milestone" ]]; then
+    local counts_line total active_c backlog_c done_c parked_c killed_c
+    counts_line="$(_focus_milestone_counts "$id")"
+    read -r total active_c backlog_c done_c parked_c killed_c <<< "$counts_line"
+    local pct=0
+    (( total > 0 )) && pct=$(( done_c * 100 / total ))
+    echo "Progress: ${done_c}/${total} done (${pct}%)  active:${active_c} backlog:${backlog_c} parked:${parked_c} killed:${killed_c}"
+  fi
   echo ""
   echo "Contract items:"
   local found_contract=false
@@ -465,6 +615,29 @@ _focus_cmd_show() {
   echo ""
   echo "Body:"
   _focus_read_body "$path"
+
+  if [[ "$type" == "milestone" ]]; then
+    echo ""
+    echo "Children:"
+    local printed_any=false
+    local s
+    for s in active backlog done parked killed; do
+      local f cid ctitle cstatus cproject
+      while IFS= read -r f; do
+        [[ -n "$f" ]] || continue
+        cstatus="$(_focus_read_field "$f" "status")"
+        [[ "$cstatus" == "$s" ]] || continue
+        cid="$(_focus_read_field "$f" "id")"
+        ctitle="$(_focus_read_field "$f" "title")"
+        cproject="$(_focus_read_field "$f" "project")"
+        printf '  [%-7s] #%-4s %s' "$cstatus" "$cid" "$ctitle"
+        [[ -n "$cproject" ]] && printf '  (%s)' "$cproject"
+        printf '\n'
+        printed_any=true
+      done < <(_focus_milestone_children "$id")
+    done
+    $printed_any || echo "  (none)"
+  fi
 }
 
 _focus_cmd_activate() {
@@ -564,6 +737,22 @@ _focus_cmd_done() {
   path="$(_focus_card_path "$ref")" || return 1
   local card_ref
   card_ref="$(_focus_card_ref "$path")"
+
+  # Milestone children check
+  if _focus_is_milestone "$path"; then
+    local milestone_id
+    milestone_id="$(_focus_read_field "$path" "id")"
+    local counts_line total active_c backlog_c done_c parked_c killed_c
+    counts_line="$(_focus_milestone_counts "$milestone_id")"
+    read -r total active_c backlog_c done_c parked_c killed_c <<< "$counts_line"
+    local unfinished=$(( active_c + backlog_c ))
+    if (( unfinished > 0 )) && ! $FORCE; then
+      echo "error: milestone has ${unfinished} unfinished child card(s)" >&2
+      echo "  total: ${total}  done: ${done_c}  active: ${active_c}  backlog: ${backlog_c}  parked: ${parked_c}  killed: ${killed_c}" >&2
+      echo "  hint: finish children first, or use --force" >&2
+      return 1
+    fi
+  fi
 
   # Contract check
   local contract_items=()
@@ -768,6 +957,110 @@ _focus_cmd_setup() {
   echo "Config saved to: $FOCUS_CONFIG_FILE"
 }
 
+_focus_cmd_milestone() {
+  _focus_require_kanban_dir
+  local sub="${1:-}"
+  shift || true
+
+  case "$sub" in
+    "")
+      echo "usage: focus milestone <id|new|list|add> [args]" >&2
+      return 1
+      ;;
+    new)
+      _focus_cmd_milestone_new "$@"
+      ;;
+    list|ls)
+      _focus_cmd_milestone_list "$@"
+      ;;
+    add)
+      _focus_cmd_milestone_add "$@"
+      ;;
+    *)
+      # Treat as milestone id/slug -- show milestone detail
+      _focus_cmd_milestone_show "$sub"
+      ;;
+  esac
+}
+
+_focus_cmd_milestone_new() {
+  local title="${1:-}"
+  local project="${2:-}"
+  if [[ -z "$title" ]]; then
+    echo "usage: focus milestone new \"title\" [project]" >&2
+    return 1
+  fi
+  if [[ -n "$project" ]]; then
+    _focus_cmd_new "$title" "$project" --type milestone
+  else
+    _focus_cmd_new "$title" --type milestone
+  fi
+}
+
+_focus_cmd_milestone_show() {
+  local ref="${1:-}"
+  if [[ -z "$ref" ]]; then
+    echo "usage: focus milestone <id|slug>" >&2
+    return 1
+  fi
+  local path
+  path="$(_focus_card_path "$ref")" || return 1
+  _focus_require_milestone "$path" || return 1
+  _focus_cmd_show "$ref"
+}
+
+_focus_cmd_milestone_list() {
+  local found=false
+  local f
+  printf '%-4s  %-40s  %-20s  %-8s  %-10s  %s\n' "ID" "Title" "Project" "Status" "Priority" "Progress"
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    found=true
+    local id title project status priority counts total active_c backlog_c done_c parked_c killed_c pct
+    id="$(_focus_read_field "$f" "id")"
+    title="$(_focus_truncate "$(_focus_read_field "$f" "title")" 40)"
+    project="$(_focus_truncate "$(_focus_read_field "$f" "project")" 20)"
+    status="$(_focus_read_field "$f" "status")"
+    priority="$(_focus_read_field "$f" "priority")"
+    counts="$(_focus_milestone_counts "$id")"
+    read -r total active_c backlog_c done_c parked_c killed_c <<< "$counts"
+    pct=0
+    (( total > 0 )) && pct=$(( done_c * 100 / total ))
+    printf '%-4s  %-40s  %-20s  ' "$id" "$title" "$project"
+    printf '%-8b  %-10b  %d/%d (%d%%)\n' "$(_focus_status_display "$status")" "$(_focus_priority_display "$priority")" "$done_c" "$total" "$pct"
+  done < <(_focus_milestone_files)
+  $found || echo "(no milestones)"
+}
+
+_focus_cmd_milestone_add() {
+  local milestone_ref="${1:-}"
+  local card_ref="${2:-}"
+  if [[ -z "$milestone_ref" ]] || [[ -z "$card_ref" ]]; then
+    echo "usage: focus milestone add <milestone-id> <card-id>" >&2
+    return 1
+  fi
+
+  local mpath cpath
+  mpath="$(_focus_card_path "$milestone_ref")" || return 1
+  _focus_require_milestone "$mpath" || return 1
+  cpath="$(_focus_card_path "$card_ref")" || return 1
+
+  if _focus_is_milestone "$cpath"; then
+    echo "error: cannot nest a milestone inside another milestone" >&2
+    return 1
+  fi
+
+  local milestone_id
+  milestone_id="$(_focus_read_field "$mpath" "id")"
+
+  _focus_set_field "$cpath" "milestone" "$milestone_id"
+  _focus_set_field "$cpath" "updated" "$(_focus_today)"
+
+  if ! $QUIET; then
+    echo "Linked: $(_focus_card_ref "$cpath") -> milestone #${milestone_id}"
+  fi
+}
+
 _focus_cmd_completions() {
   local shell="${1:-bash}"
   case "$shell" in
@@ -862,7 +1155,7 @@ _focus() {
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-  commands="board new show activate park kill done edit intent wip list tui init setup completions version help"
+  commands="board new milestone show activate park kill done edit intent wip list tui init setup completions version help"
   statuses="active backlog done parked killed"
 
   case "$prev" in
@@ -901,6 +1194,7 @@ _focus() {
   commands=(
     'board:Show the focus board (active + backlog)'
     'new:Create a new backlog card'
+    'milestone:Manage milestones (new/list/add/<id>)'
     'show:Show a structured card view'
     'activate:Move card to active'
     'park:Move card to parked'
@@ -991,7 +1285,13 @@ focus — kanban card manager
 
 Commands:
   board                    Show the focus board (active + backlog)
-  new "title" [project]    Create a new backlog card
+  new "title" [project]    Create a new backlog card (add --type milestone for a milestone)
+  milestone <id>           Show milestone detail with progress + children
+  milestone new "title" [project]
+                           Shortcut for 'new --type milestone'
+  milestone list           List milestones with progress summaries
+  milestone add <mid> <cid>
+                           Link a card to a milestone
   show <id|slug>           Show a structured card view
   activate <id|slug>       Move card to active (checks WIP limit)
   park <id|slug>           Move card to parked
@@ -1869,7 +2169,8 @@ main() {
 
   case "$cmd" in
     board)    _focus_cmd_board ;;
-    new)      _focus_cmd_new "${args[1]:-}" "${args[2]:-}" ;;
+    new)      _focus_cmd_new "${args[@]:1}" ;;
+    milestone) _focus_cmd_milestone "${args[@]:1}" ;;
     show)     _focus_cmd_show "${args[1]:-}" ;;
     activate) _focus_cmd_activate "${args[1]:-}" ;;
     park)     _focus_cmd_park "${args[1]:-}" ;;
