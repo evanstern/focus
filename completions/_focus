@@ -5,6 +5,7 @@ _focus() {
   commands=(
     'board:Show the focus board (active + backlog)'
     'new:Create a new backlog card'
+    'milestone:Manage milestones (new/list/add/<id>)'
     'show:Show a structured card view'
     'activate:Move card to active'
     'park:Move card to parked'
