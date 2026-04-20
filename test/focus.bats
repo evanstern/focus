@@ -177,6 +177,26 @@ load_fixture() {
   [[ "$output" =~ "work on focus" ]]
 }
 
+@test "intent --clear removes intent file" {
+  unset TMUX
+  "$FOCUS" intent "work on focus"
+  run "$FOCUS" intent --clear
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Intent cleared" ]]
+
+  run "$FOCUS" intent
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "No intent set" ]]
+}
+
+@test "intent empty string still shows intent" {
+  unset TMUX
+  "$FOCUS" intent "work on focus"
+  run "$FOCUS" intent ""
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "work on focus" ]]
+}
+
 @test "new auto-increments IDs" {
   load_fixture sample-active.md
   run "$FOCUS" new "Third task"
@@ -305,6 +325,30 @@ load_fixture() {
   run "$FOCUS" completions zsh
   [ "$status" -eq 0 ]
   [[ "$output" =~ "tui" ]]
+}
+
+@test "bash completions include milestone" {
+  run "$FOCUS" completions bash
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "milestone" ]]
+}
+
+@test "zsh completions include milestone" {
+  run "$FOCUS" completions zsh
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "milestone" ]]
+}
+
+@test "external bash completion file includes milestone" {
+  local comp_file="$BATS_TEST_DIRNAME/../completions/focus.bash"
+  run grep 'milestone' "$comp_file"
+  [ "$status" -eq 0 ]
+}
+
+@test "external zsh completion file includes milestone" {
+  local comp_file="$BATS_TEST_DIRNAME/../completions/_focus"
+  run grep 'milestone' "$comp_file"
+  [ "$status" -eq 0 ]
 }
 
 @test "edit in non-TTY prints card path and exits 0" {

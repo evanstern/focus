@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 command -v focus &>/dev/null || exit 0
-focus intent "" --quiet 2>/dev/null || true
+focus intent --clear --quiet 2>/dev/null || true
