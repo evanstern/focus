@@ -124,7 +124,7 @@ Tests set `FOCUS_HOME`, `FOCUS_KANBAN_DIR`, `FOCUS_INTENT_DIR`, and `NO_COLOR` t
 ## WIP limit and completion contract
 
 - `focus activate` blocks when active card count ≥ `$FOCUS_WIP_LIMIT`; use `--force` to override.
-- `focus done` blocks if a `contract:` list exists and any item is not checked off in the body (`- [x]`); use `--force` to override.
+- `focus done` reads `contract:` items from YAML frontmatter and interactively prompts on `/dev/tty` to confirm each one; in non-interactive contexts, use `--force` to override.
 - `focus done <milestone>` blocks if any child card is still `active` or `backlog`; use `--force` to override.
 
 ## Coda plugin
