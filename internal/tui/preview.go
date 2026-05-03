@@ -45,15 +45,32 @@ func (m *previewModel) load(id int) error {
 	return nil
 }
 
+// previewPadX and previewPadY are the interior padding inside the
+// preview pane (between border and content). Cells, not pixels.
+const (
+	previewPadX = 2
+	previewPadY = 1
+)
+
 // view renders the preview pane to fit width × height. The body is
-// wrapped to width so paragraph-shaped on-disk content reflows for
-// the available pane size.
+// wrapped to (width - 2*previewPadX) so paragraph-shaped on-disk
+// content reflows for the available pane size, with breathing room
+// inside the border.
 func (m *previewModel) view(width, height int) string {
 	if m.card == nil {
 		return ""
 	}
 	if width < 20 {
 		width = 20
+	}
+
+	innerW := width - 2*previewPadX
+	if innerW < 10 {
+		innerW = 10
+	}
+	innerH := height - 2*previewPadY
+	if innerH < 1 {
+		innerH = 1
 	}
 
 	var b strings.Builder
@@ -80,9 +97,33 @@ func (m *previewModel) view(width, height int) string {
 		}
 	}
 	b.WriteString("\n")
-	b.WriteString(m.renderBody(width))
+	b.WriteString(m.renderBody(innerW))
 
-	return clipToHeight(b.String(), height)
+	return padInsidePane(clipToHeight(b.String(), innerH), previewPadX, previewPadY)
+}
+
+// padInsidePane prepends padX spaces to every line and adds padY
+// blank rows at the top and bottom. Used to inset content from a
+// surrounding border.
+func padInsidePane(s string, padX, padY int) string {
+	if padX == 0 && padY == 0 {
+		return s
+	}
+	xPad := strings.Repeat(" ", padX)
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = xPad + line
+	}
+	if padY > 0 {
+		blank := strings.Repeat("", 0)
+		var top, bottom []string
+		for i := 0; i < padY; i++ {
+			top = append(top, blank)
+			bottom = append(bottom, blank)
+		}
+		lines = append(top, append(lines, bottom...)...)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // renderBody styles the card body with glamour, wrapping to the

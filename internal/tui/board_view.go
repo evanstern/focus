@@ -54,6 +54,12 @@ func (f filterMode) prev() filterMode {
 }
 
 type boardModel struct {
+	// allRows is the full set of rows from the most recent reload,
+	// including section headers and every card in the current filter
+	// view. rows is what's actually rendered; when no search query is
+	// active rows == allRows. Keeping both lets us build a filtered
+	// view without re-fetching from disk on every keystroke.
+	allRows  []row
 	rows     []row
 	cursor   int
 	wipLimit int
@@ -78,56 +84,121 @@ func newBoardModel(b *board.Board) (boardModel, error) {
 }
 
 // applyReload swaps in the latest data from a reloadedMsg, building
-// the row list according to the active filter. The cursor is
-// re-snapped to the first card so it never lands on a header after
-// a filter switch.
-func (m *boardModel) applyReload(msg reloadedMsg) {
+// the all-rows list according to the active filter. The visible
+// rows slice is reset to allRows; any in-flight search query needs
+// to be reapplied by the caller via applyFilter.
+//
+// preserveID: if non-zero, attempts to put the cursor on the row
+// matching this card id after reload. Falls back to row 0 if the
+// id isn't present (filter changed, card archived, etc).
+func (m *boardModel) applyReload(msg reloadedMsg, preserveID int) {
 	m.filter = msg.filter
-	m.rows = m.rows[:0]
+	m.allRows = m.allRows[:0]
 
 	if msg.view != nil {
-		m.rows = append(m.rows, row{header: fmt.Sprintf("ACTIVE (%d/%d)", len(msg.view.Active), m.wipLimit)})
+		m.allRows = append(m.allRows, row{header: fmt.Sprintf("ACTIVE (%d/%d)", len(msg.view.Active), m.wipLimit)})
 		for i := range msg.view.Active {
 			e := msg.view.Active[i]
-			m.rows = append(m.rows, row{entry: &e})
+			m.allRows = append(m.allRows, row{entry: &e})
 		}
-		m.rows = append(m.rows, row{header: "BACKLOG"})
+		m.allRows = append(m.allRows, row{header: "BACKLOG"})
 		for i := range msg.view.Backlog {
 			e := msg.view.Backlog[i]
-			m.rows = append(m.rows, row{entry: &e})
+			m.allRows = append(m.allRows, row{entry: &e})
 		}
 		if len(msg.view.Epics) > 0 {
-			m.rows = append(m.rows, row{header: "EPICS"})
+			m.allRows = append(m.allRows, row{header: "EPICS"})
 			for i := range msg.view.Epics {
 				e := msg.view.Epics[i]
-				m.rows = append(m.rows, row{entry: &e})
+				m.allRows = append(m.allRows, row{entry: &e})
 			}
 		}
 	} else {
 		header := strings.ToUpper(msg.filter.label())
-		m.rows = append(m.rows, row{header: fmt.Sprintf("%s (%d)", header, len(msg.entries))})
+		m.allRows = append(m.allRows, row{header: fmt.Sprintf("%s (%d)", header, len(msg.entries))})
 		for i := range msg.entries {
 			e := msg.entries[i]
-			m.rows = append(m.rows, row{entry: &e})
+			m.allRows = append(m.allRows, row{entry: &e})
 		}
 	}
-	m.snapCursorToCard(0)
+	m.rows = m.allRows
+	m.placeCursor(preserveID)
 }
 
-// snapCursorToCard moves m.cursor to the nearest card row >= start.
-// Used after reload so the cursor never lands on a header.
-func (m *boardModel) snapCursorToCard(start int) {
-	if start < 0 {
-		start = 0
+// applyFilter rebuilds m.rows from m.allRows, keeping only card rows
+// whose entry matches the query (case-insensitive substring against
+// id, title, project, owner, tags). Section headers are kept only
+// if at least one card in their section matches. Empty query leaves
+// the full list visible.
+//
+// If the previously-selected card is still present in the filtered
+// view, the cursor stays on it. Otherwise it falls back to the first
+// visible card.
+func (m *boardModel) applyFilter(query string) {
+	prevID := 0
+	if e := m.selectedCard(); e != nil {
+		prevID = e.ID
 	}
-	for i := start; i < len(m.rows); i++ {
-		if m.rows[i].isCard() {
-			m.cursor = i
-			return
+
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		m.rows = m.allRows
+		m.placeCursor(prevID)
+		return
+	}
+
+	filtered := make([]row, 0, len(m.allRows))
+	pendingHeader := -1
+	for i, r := range m.allRows {
+		if !r.isCard() {
+			pendingHeader = i
+			continue
+		}
+		if !rowMatches(r, q) {
+			continue
+		}
+		if pendingHeader != -1 {
+			filtered = append(filtered, m.allRows[pendingHeader])
+			pendingHeader = -1
+		}
+		filtered = append(filtered, r)
+	}
+	m.rows = filtered
+	m.placeCursor(prevID)
+}
+
+// rowMatches tests whether a card row matches the search query.
+// Searches id (e.g. "0007" or "7"), title, project, owner, tags.
+func rowMatches(r row, q string) bool {
+	if r.entry == nil {
+		return false
+	}
+	e := r.entry
+	hay := strings.ToLower(
+		fmt.Sprintf("%04d %d %s %s %s %s",
+			e.ID, e.ID, e.Title, e.Project, e.Owner, strings.Join(e.Tags, " "),
+		),
+	)
+	return strings.Contains(hay, q)
+}
+
+// placeCursor puts the cursor on the row whose entry id matches
+// preserveID. Falls back to the first card if the id isn't present.
+func (m *boardModel) placeCursor(preserveID int) {
+	if preserveID > 0 {
+		for i, r := range m.rows {
+			if r.isCard() && r.entry.ID == preserveID {
+				m.cursor = i
+				return
+			}
 		}
 	}
-	for i := start - 1; i >= 0; i-- {
-		if m.rows[i].isCard() {
+	m.placeCursorAtFirstCard()
+}
+
+func (m *boardModel) placeCursorAtFirstCard() {
+	for i, r := range m.rows {
+		if r.isCard() {
 			m.cursor = i
 			return
 		}
@@ -157,7 +228,7 @@ func (m *boardModel) moveCursor(delta int) {
 }
 
 // gotoFirstCard / gotoLastCard implement gg / G.
-func (m *boardModel) gotoFirstCard() { m.snapCursorToCard(0) }
+func (m *boardModel) gotoFirstCard() { m.placeCursorAtFirstCard() }
 func (m *boardModel) gotoLastCard() {
 	for i := len(m.rows) - 1; i >= 0; i-- {
 		if m.rows[i].isCard() {
@@ -349,19 +420,29 @@ func (m *boardModel) scrollWindow(height int) (int, int) {
 // reloadedMsg carries fresh board data and the filter mode it was
 // fetched under. Exactly one of view (kanban-shaped) or entries
 // (flat list) is non-nil, depending on filter.
+//
+// preserveID, if non-zero, is the card id the cursor should land on
+// after applyReload. Producers set this to whatever card the user
+// was looking at (or just edited) so reload doesn't snap the cursor
+// back to the top.
 type reloadedMsg struct {
-	filter  filterMode
-	view    *board.BoardView
-	entries []index.Entry
+	filter     filterMode
+	view       *board.BoardView
+	entries    []index.Entry
+	preserveID int
 }
 
 // statusMsg sets the bottom-bar ephemeral status (e.g. "card #7
 // activated"). Cleared by the next reload.
 type statusMsg string
 
-// reloadCmd fetches the data appropriate for filter f. filterInFlight
-// uses Board() (the kanban shape); the others use List().
-func reloadCmd(b *board.Board, f filterMode) tea.Cmd {
+// reloadCmd fetches the data appropriate for filter f and returns
+// a reloadedMsg that places the cursor on preserveID after apply.
+// Pass 0 for preserveID to fall back to the first card.
+//
+// filterInFlight uses Board() (the kanban shape); the others use
+// List() with a status filter.
+func reloadCmd(b *board.Board, f filterMode, preserveID int) tea.Cmd {
 	return func() tea.Msg {
 		switch f {
 		case filterInFlight:
@@ -369,7 +450,7 @@ func reloadCmd(b *board.Board, f filterMode) tea.Cmd {
 			if err != nil {
 				return statusMsg("reload error: " + err.Error())
 			}
-			return reloadedMsg{filter: f, view: v}
+			return reloadedMsg{filter: f, view: v, preserveID: preserveID}
 		default:
 			opts := board.ListOpts{}
 			switch f {
@@ -382,7 +463,7 @@ func reloadCmd(b *board.Board, f filterMode) tea.Cmd {
 			if err != nil {
 				return statusMsg("reload error: " + err.Error())
 			}
-			return reloadedMsg{filter: f, entries: es}
+			return reloadedMsg{filter: f, entries: es, preserveID: preserveID}
 		}
 	}
 }

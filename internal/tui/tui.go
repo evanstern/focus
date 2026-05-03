@@ -132,11 +132,12 @@ type Model struct {
 	width  int
 	height int
 
-	board_  boardModel
-	preview previewModel
-	help    helpModel
-	search  searchState
-	command commandState
+	board_   boardModel
+	preview  previewModel
+	help     helpModel
+	search   searchState
+	command  commandState
+	gPending bool
 
 	// status is the line at the bottom of the screen used for ephemeral
 	// feedback after a transition or error. Cleared on the next reload.
@@ -163,7 +164,7 @@ func newModel(b *board.Board) (*Model, error) {
 // Init is Bubble Tea's startup hook. We use it to fire off the first
 // board reload so the screen has data before any keystroke.
 func (m *Model) Init() tea.Cmd {
-	return reloadCmd(m.board, m.board_.filter)
+	return reloadCmd(m.board, m.board_.filter, 0)
 }
 
 // Update routes messages to handlers. Cursor movement in the board
@@ -176,7 +177,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case reloadedMsg:
-		m.board_.applyReload(msg)
+		m.board_.applyReload(msg, msg.preserveID)
+		m.board_.applyFilter(m.search.query)
 		m.status = ""
 		m.refreshPreview()
 		return m, nil
@@ -187,11 +189,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case editFinishedMsg:
 		// $EDITOR exited; reload the card from disk in case the user
-		// changed body or frontmatter.
+		// changed body or frontmatter, and put the cursor back on the
+		// card they just edited.
 		if msg.id != 0 {
 			m.preview.invalidate(msg.id)
 		}
-		return m, reloadCmd(m.board, m.board_.filter)
+		return m, reloadCmd(m.board, m.board_.filter, msg.id)
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)

@@ -132,10 +132,125 @@ func TestModelSearchFiltersAndJumps(t *testing.T) {
 		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 		m = updated.(*Model)
 	}
+	if got := m.board_.selectedCard(); got == nil || got.Title != "gamma" {
+		t.Errorf("live search didn't jump to gamma; got %+v", got)
+	}
+
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(*Model)
+	if m.input != modeNormal {
+		t.Errorf("enter should exit search mode, got %v", m.input)
+	}
 	if got := m.board_.selectedCard(); got == nil || got.Title != "gamma" {
-		t.Errorf("search didn't jump to gamma, got %+v", got)
+		t.Errorf("filter cleared on enter; got %+v", got)
+	}
+}
+
+func TestSearchByCardID(t *testing.T) {
+	b := setupBoard(t)
+	m, _ := newModel(b)
+	v, _ := b.Board()
+	updated, _ := m.Update(reloadedMsg{view: v})
+	m = updated.(*Model)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(*Model)
+	for _, r := range "0002" {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = updated.(*Model)
+	}
+	got := m.board_.selectedCard()
+	if got == nil || got.ID != 2 {
+		t.Errorf("search /0002 should find card #2; got %+v", got)
+	}
+}
+
+func TestSearchEscClearsFilter(t *testing.T) {
+	b := setupBoard(t)
+	m, _ := newModel(b)
+	v, _ := b.Board()
+	updated, _ := m.Update(reloadedMsg{view: v})
+	m = updated.(*Model)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(*Model)
+	for _, r := range "gamma" {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = updated.(*Model)
+	}
+	cardCount := func() int {
+		n := 0
+		for _, r := range m.board_.rows {
+			if r.isCard() {
+				n++
+			}
+		}
+		return n
+	}
+	if cardCount() != 1 {
+		t.Fatalf("expected 1 card visible after filter; got %d", cardCount())
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(*Model)
+	if cardCount() != 3 {
+		t.Errorf("esc should restore full list; got %d cards", cardCount())
+	}
+	if m.status != "" {
+		t.Errorf("esc didn't clear status: %q", m.status)
+	}
+}
+
+func TestSearchNoMatchesStatusClearsOnBackspace(t *testing.T) {
+	b := setupBoard(t)
+	m, _ := newModel(b)
+	v, _ := b.Board()
+	updated, _ := m.Update(reloadedMsg{view: v})
+	m = updated.(*Model)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	m = updated.(*Model)
+	for _, r := range "zzzzz" {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = updated.(*Model)
+	}
+	if m.status != "no matches" {
+		t.Errorf("expected 'no matches' status; got %q", m.status)
+	}
+	for i := 0; i < 5; i++ {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+		m = updated.(*Model)
+	}
+	if m.status != "" {
+		t.Errorf("status should clear when filter clears; got %q", m.status)
+	}
+}
+
+func TestEditPreservesCursor(t *testing.T) {
+	b := setupBoard(t)
+	m, _ := newModel(b)
+	v, _ := b.Board()
+	updated, _ := m.Update(reloadedMsg{view: v})
+	m = updated.(*Model)
+
+	for i := 0; i < 2; i++ {
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+		m = updated.(*Model)
+	}
+	beforeID := m.board_.selectedCard().ID
+
+	updated, _ = m.Update(editFinishedMsg{id: beforeID})
+	m = updated.(*Model)
+	cmd := m.Init
+	_ = cmd
+
+	v2, _ := b.Board()
+	updated, _ = m.Update(reloadedMsg{view: v2, preserveID: beforeID})
+	m = updated.(*Model)
+
+	got := m.board_.selectedCard()
+	if got == nil || got.ID != beforeID {
+		t.Errorf("cursor lost after reload-with-preserve; want id=%d, got=%+v", beforeID, got)
 	}
 }
 

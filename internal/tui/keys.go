@@ -16,9 +16,7 @@ import (
 // plain string + a few key handlers is more direct than wiring up
 // a sub-model.
 type searchState struct {
-	query   string
-	matches []int
-	cursor  int
+	query string
 }
 
 func newSearchState() searchState { return searchState{} }
@@ -38,18 +36,19 @@ func (c *commandState) reset() { c.input = "" }
 func (m *Model) handleBoardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
-	// gg sequence: track the previous "g" so a second "g" jumps to top.
+	// gg sequence: track whether the previous keystroke was "g" so
+	// a second "g" jumps to top. Any other key clears the flag.
 	if key == "g" {
-		if m.search.cursor == -1 {
+		if m.gPending {
 			m.board_.gotoFirstCard()
 			m.refreshPreview()
-			m.search.cursor = 0
+			m.gPending = false
 			return m, nil
 		}
-		m.search.cursor = -1
+		m.gPending = true
 		return m, nil
 	}
-	m.search.cursor = 0
+	m.gPending = false
 
 	switch key {
 	case "q":
@@ -72,7 +71,7 @@ func (m *Model) handleBoardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		m.input = modeSearch
 		m.search.query = ""
-		m.search.matches = nil
+		m.board_.applyFilter("")
 	case "enter", "e", "o":
 		if e := m.board_.selectedCard(); e != nil {
 			return m, m.editCmd(e.ID)
@@ -87,18 +86,12 @@ func (m *Model) handleBoardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.transitionCmd("kill")
 	case "r":
 		return m, m.transitionCmd("revive")
-	case "n":
-		m.advanceSearchMatch(1)
-		m.refreshPreview()
-	case "N":
-		m.advanceSearchMatch(-1)
-		m.refreshPreview()
 	case "tab", "l":
 		next := m.board_.filter.next()
-		return m, reloadCmd(m.board, next)
+		return m, reloadCmd(m.board, next, 0)
 	case "shift+tab", "h":
 		prev := m.board_.filter.prev()
-		return m, reloadCmd(m.board, prev)
+		return m, reloadCmd(m.board, prev, 0)
 	case "s":
 		m.split = m.split.next()
 		m.status = "layout: " + m.split.label()
@@ -106,34 +99,62 @@ func (m *Model) handleBoardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleSearchKey handles key events while in / mode. Enter applies
-// the filter; esc cancels.
+// handleSearchKey handles key events while in / mode. Search is
+// live: every keystroke filters the visible nav rows. Esc clears
+// the query and exits search mode; enter just exits search mode but
+// keeps the filter applied so the user can keep navigating with
+// j/k over the matched set.
 func (m *Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.input = modeNormal
 		m.search.query = ""
-		m.search.matches = nil
+		m.status = ""
+		m.board_.applyFilter("")
+		m.refreshPreview()
 		return m, nil
 	case "enter":
-		m.computeMatches()
 		m.input = modeNormal
-		if len(m.search.matches) > 0 {
-			m.jumpToMatch(0)
-		} else {
-			m.status = "no matches"
-		}
+		m.status = ""
 		return m, nil
 	case "backspace":
 		if len(m.search.query) > 0 {
 			m.search.query = m.search.query[:len(m.search.query)-1]
 		}
+		m.board_.applyFilter(m.search.query)
+		m.updateNoMatchesStatus()
+		m.refreshPreview()
 		return m, nil
 	}
 	if isPrintable(msg) {
 		m.search.query += msg.String()
+		m.board_.applyFilter(m.search.query)
+		m.updateNoMatchesStatus()
+		m.refreshPreview()
 	}
 	return m, nil
+}
+
+// updateNoMatchesStatus sets m.status to a feedback message based on
+// the current filtered row count, or clears it if at least one match
+// is visible. Cleared on every keystroke so the message tracks the
+// live query rather than sticking around forever.
+func (m *Model) updateNoMatchesStatus() {
+	if m.search.query == "" {
+		m.status = ""
+		return
+	}
+	cards := 0
+	for _, r := range m.board_.rows {
+		if r.isCard() {
+			cards++
+		}
+	}
+	if cards == 0 {
+		m.status = "no matches"
+	} else {
+		m.status = ""
+	}
 }
 
 // handleCommandKey handles : mode.
@@ -178,66 +199,6 @@ func isPrintable(msg tea.KeyMsg) bool {
 	return true
 }
 
-// computeMatches builds m.search.matches from m.search.query. We
-// match against title, project, owner, and tags — explicitly NOT
-// body text, since the index doesn't carry it (designs/focus-issue
-// -001.md §"Search behavior").
-func (m *Model) computeMatches() {
-	q := strings.ToLower(strings.TrimSpace(m.search.query))
-	m.search.matches = m.search.matches[:0]
-	if q == "" {
-		return
-	}
-	for _, r := range m.board_.rows {
-		if !r.isCard() {
-			continue
-		}
-		e := r.entry
-		hay := strings.ToLower(e.Title + " " + e.Project + " " + e.Owner + " " + strings.Join(e.Tags, " "))
-		if strings.Contains(hay, q) {
-			m.search.matches = append(m.search.matches, e.ID)
-		}
-	}
-}
-
-// jumpToMatch moves the cursor to the row of the i-th search match.
-func (m *Model) jumpToMatch(i int) {
-	if len(m.search.matches) == 0 {
-		return
-	}
-	if i < 0 {
-		i = len(m.search.matches) - 1
-	} else if i >= len(m.search.matches) {
-		i = 0
-	}
-	id := m.search.matches[i]
-	for idx, r := range m.board_.rows {
-		if r.isCard() && r.entry.ID == id {
-			m.board_.cursor = idx
-			return
-		}
-	}
-}
-
-// advanceSearchMatch implements n / N over the matches.
-func (m *Model) advanceSearchMatch(delta int) {
-	if len(m.search.matches) == 0 {
-		return
-	}
-	curID := -1
-	if e := m.board_.selectedCard(); e != nil {
-		curID = e.ID
-	}
-	pos := 0
-	for i, id := range m.search.matches {
-		if id == curID {
-			pos = i
-			break
-		}
-	}
-	m.jumpToMatch(pos + delta)
-}
-
 // transitionCmd is the command issued when the user presses a, p,
 // d, K, or r in board view. Runs the transition off the
 // message-handling goroutine, then triggers a reload so the screen
@@ -254,7 +215,7 @@ func (m *Model) transitionCmd(name string) tea.Cmd {
 		if err := runTransition(board_, name, id); err != nil {
 			return statusMsg(err.Error())
 		}
-		return reloadCmd(board_, filter)()
+		return reloadCmd(board_, filter, id)()
 	}
 }
 
@@ -302,11 +263,15 @@ func (m *Model) runCommandLine(line string) tea.Cmd {
 	case "reindex":
 		board_ := m.board
 		filter := m.board_.filter
+		preserveID := 0
+		if e := m.board_.selectedCard(); e != nil {
+			preserveID = e.ID
+		}
 		return func() tea.Msg {
 			if _, err := board_.Reindex(); err != nil {
 				return statusMsg("reindex: " + err.Error())
 			}
-			return reloadCmd(board_, filter)()
+			return reloadCmd(board_, filter, preserveID)()
 		}
 	case "new":
 		if rest == "" {
@@ -315,10 +280,11 @@ func (m *Model) runCommandLine(line string) tea.Cmd {
 		board_ := m.board
 		filter := m.board_.filter
 		return func() tea.Msg {
-			if _, _, err := board_.NewCard(rest, board.NewCardOpts{}); err != nil {
+			c, _, err := board_.NewCard(rest, board.NewCardOpts{})
+			if err != nil {
 				return statusMsg("new: " + err.Error())
 			}
-			return reloadCmd(board_, filter)()
+			return reloadCmd(board_, filter, c.ID)()
 		}
 	}
 
