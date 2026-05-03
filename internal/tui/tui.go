@@ -15,10 +15,10 @@ package tui
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/evanstern/focus/internal/board"
+	"github.com/evanstern/focus/internal/editor"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -312,7 +312,8 @@ type editFinishedMsg struct {
 
 // editCmd suspends the TUI, runs $EDITOR on the card's INDEX.md,
 // then resumes. tea.ExecProcess handles the suspend/resume dance;
-// we just supply the *exec.Cmd.
+// editor.Command parses $EDITOR (including multi-token forms like
+// "code -w") so we don't choke on common editor configs.
 func (m *Model) editCmd(id int) tea.Cmd {
 	dirName, err := m.board.FindCardDir(id)
 	if err != nil {
@@ -320,11 +321,10 @@ func (m *Model) editCmd(id int) tea.Cmd {
 	}
 	path := m.board.CardFile(dirName)
 
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = "vi"
+	cmd, err := editor.Command(path)
+	if err != nil {
+		return func() tea.Msg { return statusMsg("edit: " + err.Error()) }
 	}
-	cmd := exec.Command(editor, path)
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		return editFinishedMsg{id: id, err: err}
 	})

@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strconv"
+
+	"github.com/evanstern/focus/internal/editor"
 )
 
 func runEdit(args []string, stdout, stderr io.Writer) int {
@@ -37,11 +38,6 @@ func runEdit(args []string, stdout, stderr io.Writer) int {
 	}
 	path := b.CardFile(dirName)
 
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = "vi"
-	}
-
 	// In non-tty contexts (CI, MCP, scripts) opening an editor is the
 	// wrong behavior; print the path so the caller can do something
 	// useful with it. v1 grew this affordance organically; v2 ships
@@ -51,7 +47,11 @@ func runEdit(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	cmd := exec.Command(editor, path)
+	cmd, err := editor.Command(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "focus: %v\n", err)
+		return 1
+	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
