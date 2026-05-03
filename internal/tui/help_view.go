@@ -13,10 +13,6 @@ type helpModel struct {
 func newHelpModel() helpModel {
 	var b strings.Builder
 	b.WriteString("focus TUI — keybindings\n\n")
-	b.WriteString("LAYOUT\n")
-	b.WriteString("  Wide terminal: nav left, preview right.\n")
-	b.WriteString("  Narrow terminal: nav top, preview bottom.\n")
-	b.WriteString("  Preview always reflects the highlighted card.\n\n")
 	b.WriteString("MOVEMENT\n")
 	b.WriteString("  j / down       move down\n")
 	b.WriteString("  k / up         move up\n")
@@ -33,6 +29,8 @@ func newHelpModel() helpModel {
 	b.WriteString("  r              revive (archived -> backlog)\n\n")
 	b.WriteString("FILTER\n")
 	b.WriteString("  tab            cycle in-flight \u2192 all \u2192 done \u2192 archived\n\n")
+	b.WriteString("LAYOUT\n")
+	b.WriteString("  s              cycle auto \u2192 horizontal \u2192 vertical\n\n")
 	b.WriteString("MODES\n")
 	b.WriteString("  /              search\n")
 	b.WriteString("  :              command-mode\n")

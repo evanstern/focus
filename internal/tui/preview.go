@@ -8,7 +8,6 @@ import (
 	"github.com/evanstern/focus/internal/board/card"
 
 	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // previewModel renders a single card's frontmatter header + body
@@ -19,14 +18,15 @@ type previewModel struct {
 	board *board.Board
 	card  *card.Card
 
-	// rendered caches the glamour-rendered body keyed by card id.
-	// Width is no longer in the key because we don't soft-wrap; the
-	// rendered output is the same regardless of how wide the pane is.
+	// rendered caches the glamour-rendered body keyed by card id +
+	// wrap width. Width is in the key because glamour reflows on
+	// resize and the wrapped output is what we want to cache.
 	rendered map[previewKey]string
 }
 
 type previewKey struct {
-	id int
+	id    int
+	width int
 }
 
 func newPreviewModel(b *board.Board) previewModel {
@@ -45,8 +45,9 @@ func (m *previewModel) load(id int) error {
 	return nil
 }
 
-// view renders the preview pane to fit width × height. height is a
-// hard cap — we truncate output to fit so the layout never breaks.
+// view renders the preview pane to fit width × height. The body is
+// wrapped to width so paragraph-shaped on-disk content reflows for
+// the available pane size.
 func (m *previewModel) view(width, height int) string {
 	if m.card == nil {
 		return ""
@@ -79,34 +80,31 @@ func (m *previewModel) view(width, height int) string {
 		}
 	}
 	b.WriteString("\n")
-	b.WriteString(m.renderBody())
+	b.WriteString(m.renderBody(width))
 
 	return clipToHeight(b.String(), height)
 }
 
-// renderBody styles the card body with glamour but disables soft
-// wrap so users see the content exactly as written. Long lines get
-// clipped at the pane edge by padPaneLines (using ansi.Truncate).
-//
-// WithPreservedNewLines is required because glamour's CommonMark
-// pass collapses author-inserted line breaks otherwise — paragraphs
-// become single long lines, which is the opposite of what we want
-// when the on-disk file has hand-formatted line lengths.
-//
-// The cache is keyed only by card id (not width) since output no
-// longer depends on width.
-func (m *previewModel) renderBody() string {
+// renderBody styles the card body with glamour, wrapping to the
+// supplied width. With our paragraph-shaped body convention,
+// glamour's word-wrap is the right thing: it reflows paragraphs to
+// width while preserving the structural line breaks (lists, code
+// fences, headings).
+func (m *previewModel) renderBody(width int) string {
 	if m.card == nil {
 		return ""
 	}
-	key := previewKey{id: m.card.ID}
+	w := width - 2
+	if w < 20 {
+		w = 20
+	}
+	key := previewKey{id: m.card.ID, width: w}
 	if cached, ok := m.rendered[key]; ok {
 		return cached
 	}
 	r, err := glamour.NewTermRenderer(
 		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(0),
-		glamour.WithPreservedNewLines(),
+		glamour.WithWordWrap(w),
 	)
 	if err != nil {
 		return m.card.Body
@@ -127,62 +125,6 @@ func (m *previewModel) invalidate(id int) {
 			delete(m.rendered, k)
 		}
 	}
-}
-
-// contentWidth returns the widest visible-column count across all
-// header + body lines for the currently-loaded card. Used by the
-// layout to size the preview pane to the content's natural width.
-//
-// Returns 0 when no card is loaded. ANSI-aware via ansi.StringWidth.
-func (m *previewModel) contentWidth() int {
-	if m.card == nil {
-		return 0
-	}
-	rendered := m.viewWithoutClip()
-	max := 0
-	for _, line := range strings.Split(rendered, "\n") {
-		w := ansi.StringWidth(line)
-		if w > max {
-			max = w
-		}
-	}
-	return max
-}
-
-// viewWithoutClip is the unclipped, unbounded version of view().
-// Same content as a normal preview render, but skips clipToHeight so
-// contentWidth can measure every line, not just what would fit on
-// screen.
-func (m *previewModel) viewWithoutClip() string {
-	if m.card == nil {
-		return ""
-	}
-	c := m.card
-	var b strings.Builder
-	fmt.Fprintf(&b, "#%s  %s\n", card.PaddedID(c.ID), c.Title)
-	fmt.Fprintf(&b, "  status: %s   priority: %s\n", c.Status, c.Priority)
-	fmt.Fprintf(&b, "  project: %s   type: %s\n", c.Project, c.Type)
-	if c.Epic != nil {
-		fmt.Fprintf(&b, "  epic: #%04d\n", *c.Epic)
-	}
-	if !c.Created.IsZero() {
-		fmt.Fprintf(&b, "  created: %s\n", c.Created.Format("2006-01-02"))
-	}
-	if c.Owner != "" {
-		fmt.Fprintf(&b, "  owner: %s\n", c.Owner)
-	}
-	if len(c.Tags) > 0 {
-		fmt.Fprintf(&b, "  tags: %s\n", strings.Join(c.Tags, ", "))
-	}
-	if len(c.Contract) > 0 {
-		fmt.Fprintln(&b, "  contract:")
-		for _, item := range c.Contract {
-			fmt.Fprintf(&b, "    - %s\n", item)
-		}
-	}
-	b.WriteString("\n")
-	b.WriteString(m.renderBody())
-	return b.String()
 }
 
 // clipToHeight returns at most n lines of s. Used to keep the

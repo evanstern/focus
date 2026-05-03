@@ -96,6 +96,9 @@ func (m *Model) handleBoardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "tab":
 		next := m.board_.filter.next()
 		return m, reloadCmd(m.board, next)
+	case "s":
+		m.split = m.split.next()
+		m.status = "layout: " + m.split.label()
 	}
 	return m, nil
 }

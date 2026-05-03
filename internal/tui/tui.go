@@ -55,6 +55,34 @@ const (
 	modeCommand
 )
 
+// splitMode controls how the nav and preview panes are arranged.
+// 's' cycles auto -> horizontal -> vertical -> auto. Auto picks
+// horizontal when the terminal is wide enough for both panes,
+// vertical otherwise.
+type splitMode int
+
+const (
+	splitAuto splitMode = iota
+	splitHorizontal
+	splitVertical
+)
+
+func (s splitMode) label() string {
+	switch s {
+	case splitHorizontal:
+		return "horizontal"
+	case splitVertical:
+		return "vertical"
+	}
+	return "auto"
+}
+
+func (s splitMode) next() splitMode { return (s + 1) % 3 }
+
+// autoSplitThreshold is the minimum terminal width at which auto-mode
+// picks horizontal layout. Below this, auto stacks vertically.
+const autoSplitThreshold = 120
+
 // Model is the root Bubble Tea model. Holds the resolved board, the
 // current view + input modes, and references to each sub-model.
 type Model struct {
@@ -62,6 +90,7 @@ type Model struct {
 
 	view  viewMode
 	input inputMode
+	split splitMode
 
 	width  int
 	height int
@@ -196,7 +225,7 @@ func (m *Model) View() string {
 	if bodyHeight < 1 {
 		bodyHeight = 1
 	}
-	body := renderSplit(m.width, bodyHeight, &m.board_, &m.preview)
+	body := renderSplit(m.split, m.width, bodyHeight, &m.board_, &m.preview)
 	return body + "\n" + m.statusLine()
 }
 
@@ -218,7 +247,7 @@ func (m *Model) statusLine() string {
 	if m.status != "" {
 		return fmt.Sprintf("%s  %s", mode, m.status)
 	}
-	hint := "j/k move  tab cycle  e edit  a/p/d/K/r transition  /search  :command  ?help  q quit"
+	hint := "j/k move  tab filter  s layout  e edit  a/p/d/K/r transition  /search  :command  ?help  q quit"
 	return fmt.Sprintf("%s  %s", mode, hint)
 }
 

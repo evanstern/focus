@@ -3,8 +3,6 @@ package tui
 import (
 	"strings"
 	"testing"
-
-	"github.com/charmbracelet/x/ansi"
 )
 
 func TestPadLine(t *testing.T) {
@@ -42,21 +40,21 @@ func TestPadPaneLinesProducesRectangle(t *testing.T) {
 	}
 }
 
-func TestRenderSplitWideUsesHorizontal(t *testing.T) {
+func TestRenderSplitAutoWidePicksHorizontal(t *testing.T) {
 	b := setupBoard(t)
 	m, _ := newModel(b)
 	v, _ := b.Board()
 	updated, _ := m.Update(reloadedMsg{view: v})
 	m = updated.(*Model)
 
-	out := renderSplit(200, 20, &m.board_, &m.preview)
+	out := renderSplit(splitAuto, 200, 20, &m.board_, &m.preview)
 	firstLine := strings.SplitN(out, "\n", 2)[0]
 	if !strings.Contains(firstLine, "ACTIVE") || !strings.Contains(firstLine, "#0001") {
-		t.Errorf("wide layout didn't side-by-side; first line = %q", firstLine)
+		t.Errorf("auto+wide didn't go horizontal; first line = %q", firstLine)
 	}
 }
 
-func TestRenderSplitTooNarrowStacks(t *testing.T) {
+func TestRenderSplitAutoNarrowPicksVertical(t *testing.T) {
 	b := setupBoard(t)
 	m, _ := newModel(b)
 	v, _ := b.Board()
@@ -64,30 +62,47 @@ func TestRenderSplitTooNarrowStacks(t *testing.T) {
 	m = updated.(*Model)
 
 	const termWidth = 50
-	out := renderSplit(termWidth, 20, &m.board_, &m.preview)
+	out := renderSplit(splitAuto, termWidth, 20, &m.board_, &m.preview)
 	if !strings.Contains(out, strings.Repeat("─", termWidth)) {
-		t.Errorf("narrow layout didn't draw separator: %q", out)
+		t.Errorf("auto+narrow didn't go vertical: %q", out)
 	}
 }
 
-func TestRenderSplitSizesPreviewToContent(t *testing.T) {
+func TestRenderSplitForcedHorizontalOnNarrowTerminal(t *testing.T) {
 	b := setupBoard(t)
 	m, _ := newModel(b)
 	v, _ := b.Board()
 	updated, _ := m.Update(reloadedMsg{view: v})
 	m = updated.(*Model)
 
-	contentW := m.preview.contentWidth()
-	if contentW <= 0 {
-		t.Fatal("preview reported zero content width")
-	}
-	const slack = 50
-	out := renderSplit(navNaturalWidth+1+contentW+slack, 20, &m.board_, &m.preview)
+	out := renderSplit(splitHorizontal, 80, 20, &m.board_, &m.preview)
 	firstLine := strings.SplitN(out, "\n", 2)[0]
-	totalUsed := ansi.StringWidth(firstLine)
-	wantApprox := navNaturalWidth + 1 + contentW
-	if totalUsed > wantApprox+5 {
-		t.Errorf("preview pane wider than content: total=%d, want ~%d (content=%d, nav=%d)",
-			totalUsed, wantApprox, contentW, navNaturalWidth)
+	if !strings.Contains(firstLine, "ACTIVE") || !strings.Contains(firstLine, "#0001") {
+		t.Errorf("forced horizontal didn't side-by-side; first line = %q", firstLine)
+	}
+}
+
+func TestRenderSplitForcedVerticalOnWideTerminal(t *testing.T) {
+	b := setupBoard(t)
+	m, _ := newModel(b)
+	v, _ := b.Board()
+	updated, _ := m.Update(reloadedMsg{view: v})
+	m = updated.(*Model)
+
+	out := renderSplit(splitVertical, 200, 20, &m.board_, &m.preview)
+	if !strings.Contains(out, strings.Repeat("─", 200)) {
+		t.Error("forced vertical didn't stack")
+	}
+}
+
+func TestSplitModeNextCycles(t *testing.T) {
+	if got := splitAuto.next(); got != splitHorizontal {
+		t.Errorf("auto.next = %v, want horizontal", got)
+	}
+	if got := splitHorizontal.next(); got != splitVertical {
+		t.Errorf("horizontal.next = %v, want vertical", got)
+	}
+	if got := splitVertical.next(); got != splitAuto {
+		t.Errorf("vertical.next = %v, want auto", got)
 	}
 }

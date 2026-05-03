@@ -7,58 +7,56 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// navNaturalWidth is the width the nav column wants when there's
-// room. It matches the formatRow output (#0001 + 40-char title +
-// project + priority + owner with separators) plus a small margin.
+// navNaturalWidth is the width the nav column wants in horizontal
+// mode. Matches the formatRow output plus a small margin.
 const navNaturalWidth = 80
 
-// renderSplit composes nav + preview into a single screen, sizing
-// each pane to its content. Side-by-side when the terminal can fit
-// nav at its natural width plus the preview's content width;
-// otherwise stacked so the preview gets the full terminal width.
-//
-// "Content-aware" means the preview pane's width is driven by the
-// rendered card's actual longest line, not a fixed 50/50 split. A
-// short card gets a narrow preview pane and the nav grows to fill
-// the rest; a wide card forces the layout to stack so nothing gets
-// truncated unnecessarily.
-func renderSplit(width, height int, nav *boardModel, prev *previewModel) string {
+// renderSplit composes nav + preview using the requested splitMode.
+// Auto picks horizontal when width >= autoSplitThreshold, vertical
+// otherwise. Horizontal gives nav up to navNaturalWidth and the rest
+// to preview. Vertical splits the body height in half.
+func renderSplit(mode splitMode, width, height int, nav *boardModel, prev *previewModel) string {
 	if width <= 0 || height <= 0 {
 		return ""
 	}
 
-	const navMinWidth = 50
-	contentW := prev.contentWidth()
-	if contentW < 1 {
-		contentW = 1
-	}
-
-	if navNaturalWidth+1+contentW <= width {
-		return renderSideBySide(width, height, nav, prev, navNaturalWidth, contentW)
-	}
-
-	if navMinWidth+1+contentW <= width {
-		navW := width - 1 - contentW
-		if navW > navNaturalWidth {
-			navW = navNaturalWidth
+	effective := mode
+	if effective == splitAuto {
+		if width >= autoSplitThreshold {
+			effective = splitHorizontal
+		} else {
+			effective = splitVertical
 		}
-		return renderSideBySide(width, height, nav, prev, navW, width-navW-1)
 	}
 
-	return renderStacked(width, height, nav, prev)
+	if effective == splitHorizontal {
+		return renderHorizontal(width, height, nav, prev)
+	}
+	return renderVertical(width, height, nav, prev)
 }
 
-func renderSideBySide(width, height int, nav *boardModel, prev *previewModel, navW, previewW int) string {
-	gutter := " "
+func renderHorizontal(width, height int, nav *boardModel, prev *previewModel) string {
+	navW := navNaturalWidth
+	if navW > width-21 {
+		navW = width - 21
+	}
+	if navW < 20 {
+		navW = 20
+	}
+	previewW := width - navW - 1
 
+	gutter := " "
 	left := nav.view(navW, height)
 	right := prev.view(previewW, height)
 
 	left = padPaneLines(left, navW, height)
 	right = padPaneLines(right, previewW, height)
 
-	_ = width
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, gutter, right)
+}
+
+func renderVertical(width, height int, nav *boardModel, prev *previewModel) string {
+	return renderStacked(width, height, nav, prev)
 }
 
 func renderStacked(width, height int, nav *boardModel, prev *previewModel) string {
