@@ -80,3 +80,25 @@ func TestSlugifyHardTruncatesUnhyphenated(t *testing.T) {
 		t.Errorf("len(got) = %d, want %d", len(got), MaxSlugLen)
 	}
 }
+
+func TestValidateSlugAccepts(t *testing.T) {
+	cases := []string{"foo", "foo-bar", "foo_bar", "abc123", "A_B-c"}
+	for _, s := range cases {
+		t.Run(s, func(t *testing.T) {
+			if err := ValidateSlug(s); err != nil {
+				t.Errorf("ValidateSlug(%q) = %v, want nil", s, err)
+			}
+		})
+	}
+}
+
+func TestValidateSlugRejects(t *testing.T) {
+	cases := []string{"a/b", "a\\b", "../escape", "foo bar", "foo.bar", "foo!", "", "a:b"}
+	for _, s := range cases {
+		t.Run(s, func(t *testing.T) {
+			if err := ValidateSlug(s); err == nil {
+				t.Errorf("ValidateSlug(%q) = nil, want error", s)
+			}
+		})
+	}
+}

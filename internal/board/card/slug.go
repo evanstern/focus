@@ -2,6 +2,7 @@ package card
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"unicode"
 )
@@ -83,3 +84,32 @@ func truncateAtHyphen(s string, maxLen int) string {
 	}
 	return cut
 }
+
+// ValidateSlug rejects user-supplied --slug values that would either
+// escape the cards/ directory or break id-based directory lookup.
+// FindCardDir globs `cards/<padded-id>-*` non-recursively, so any
+// slug containing a path separator silently corrupts the layout.
+//
+// Allowed: ASCII letters, digits, and "-" or "_". Anything else
+// returns ErrInvalidSlug. Empty input is also rejected.
+func ValidateSlug(slug string) error {
+	if slug == "" {
+		return ErrEmptySlug
+	}
+	for _, r := range slug {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-' || r == '_':
+		default:
+			return fmt.Errorf("%w: invalid character %q (allowed: a-z A-Z 0-9 - _)", ErrInvalidSlug, r)
+		}
+	}
+	return nil
+}
+
+// ErrInvalidSlug is returned by ValidateSlug when a custom --slug
+// contains characters outside the safe set (path separators,
+// whitespace, punctuation, etc).
+var ErrInvalidSlug = errors.New("invalid slug")

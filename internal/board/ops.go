@@ -59,6 +59,10 @@ func (b *Board) NewCard(title string, opts NewCardOpts) (*card.Card, string, err
 			return nil, "", err
 		}
 		slug = s
+	} else {
+		if err := card.ValidateSlug(slug); err != nil {
+			return nil, "", err
+		}
 	}
 
 	id, err := uuid.NewV7()
@@ -85,6 +89,9 @@ func (b *Board) NewCard(title string, opts NewCardOpts) (*card.Card, string, err
 			return err
 		}
 		c.ID = idx.AllocateID()
+		if err := c.Validate(); err != nil {
+			return err
+		}
 
 		dirName = card.DirName(c.ID, slug)
 		dirPath := filepath.Join(b.CardsDir(), dirName)

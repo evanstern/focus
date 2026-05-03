@@ -10,9 +10,11 @@ $ focus init
 $ focus new "Wire up the auth service"
 0001
 $ focus board
-ACTIVE
+ACTIVE (0/3)
+  (none)
+
 BACKLOG
-  0001  Wire up the auth service          p2
+  #0001  Wire up the auth service                  myapp       p2    -
 $ focus activate 1
 $ focus done 1
 ```
@@ -104,8 +106,9 @@ Free-form markdown body.
 ```
 
 The folder slug is human navigation aid only — it's not in the
-frontmatter. Cards are referenced by `id` (within a board) or
-`uuid` (globally).
+frontmatter. Cards are referenced by `id` within a board. The `uuid`
+is reserved for future cross-board features but is not yet a lookup
+key in v0.1.0.
 
 ## Architecture overview
 

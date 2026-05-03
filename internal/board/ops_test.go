@@ -21,6 +21,30 @@ func setupBoard(t *testing.T) *Board {
 	return b
 }
 
+func TestNewCardRejectsInvalidPriority(t *testing.T) {
+	b := setupBoard(t)
+	_, _, err := b.NewCard("test", NewCardOpts{Priority: "p9"})
+	if err == nil {
+		t.Error("NewCard accepted invalid priority p9")
+	}
+}
+
+func TestNewCardRejectsInvalidType(t *testing.T) {
+	b := setupBoard(t)
+	_, _, err := b.NewCard("test", NewCardOpts{Type: "milestone"})
+	if err == nil {
+		t.Error("NewCard accepted invalid type milestone")
+	}
+}
+
+func TestNewCardRejectsSlugWithPathSeparator(t *testing.T) {
+	b := setupBoard(t)
+	_, _, err := b.NewCard("test", NewCardOpts{Slug: "a/b"})
+	if err == nil {
+		t.Error("NewCard accepted --slug with path separator")
+	}
+}
+
 func TestNewCardCreatesEverything(t *testing.T) {
 	b := setupBoard(t)
 	c, dir, err := b.NewCard("Ship the feature", NewCardOpts{})

@@ -81,6 +81,10 @@ func (m *Model) handleBoardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "p":
 		return m, m.transitionCmd("park")
 	case "d":
+		if m.preview.card != nil && len(m.preview.card.Contract) > 0 {
+			m.status = fmt.Sprintf("contract has %d item(s); use `focus done %d` from CLI", len(m.preview.card.Contract), m.preview.card.ID)
+			return m, nil
+		}
 		return m, m.transitionCmd("done")
 	case "K":
 		return m, m.transitionCmd("kill")
