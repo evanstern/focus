@@ -19,10 +19,40 @@ import (
 // j/k to skip cleanly across sections. A handwritten cursor over a
 // flattened slice is simpler than wrangling list.Model into the
 // right shape.
+// filterMode is which slice of the board the nav pane is showing.
+// Tab cycles through these in order; the cycle is closed.
+type filterMode int
+
+const (
+	filterInFlight filterMode = iota
+	filterAll
+	filterDone
+	filterArchived
+)
+
+func (f filterMode) label() string {
+	switch f {
+	case filterInFlight:
+		return "in-flight"
+	case filterAll:
+		return "all"
+	case filterDone:
+		return "done"
+	case filterArchived:
+		return "archived"
+	}
+	return "?"
+}
+
+func (f filterMode) next() filterMode {
+	return (f + 1) % 4
+}
+
 type boardModel struct {
 	rows     []row
 	cursor   int
 	wipLimit int
+	filter   filterMode
 }
 
 // row is one rendered line in the board: either a header (active /
@@ -42,25 +72,37 @@ func newBoardModel(b *board.Board) (boardModel, error) {
 	return boardModel{wipLimit: cfg.EffectiveWIPLimit()}, nil
 }
 
-// applyReload swaps in the latest BoardView from a reloadedMsg.
-// We rebuild the row list rather than mutating in place so the cursor
-// can be re-clamped to a valid card index.
+// applyReload swaps in the latest data from a reloadedMsg, building
+// the row list according to the active filter. The cursor is
+// re-snapped to the first card so it never lands on a header after
+// a filter switch.
 func (m *boardModel) applyReload(msg reloadedMsg) {
+	m.filter = msg.filter
 	m.rows = m.rows[:0]
-	m.rows = append(m.rows, row{header: fmt.Sprintf("ACTIVE (%d/%d)", len(msg.view.Active), m.wipLimit)})
-	for i := range msg.view.Active {
-		e := msg.view.Active[i]
-		m.rows = append(m.rows, row{entry: &e})
-	}
-	m.rows = append(m.rows, row{header: "BACKLOG"})
-	for i := range msg.view.Backlog {
-		e := msg.view.Backlog[i]
-		m.rows = append(m.rows, row{entry: &e})
-	}
-	if len(msg.view.Epics) > 0 {
-		m.rows = append(m.rows, row{header: "EPICS"})
-		for i := range msg.view.Epics {
-			e := msg.view.Epics[i]
+
+	if msg.view != nil {
+		m.rows = append(m.rows, row{header: fmt.Sprintf("ACTIVE (%d/%d)", len(msg.view.Active), m.wipLimit)})
+		for i := range msg.view.Active {
+			e := msg.view.Active[i]
+			m.rows = append(m.rows, row{entry: &e})
+		}
+		m.rows = append(m.rows, row{header: "BACKLOG"})
+		for i := range msg.view.Backlog {
+			e := msg.view.Backlog[i]
+			m.rows = append(m.rows, row{entry: &e})
+		}
+		if len(msg.view.Epics) > 0 {
+			m.rows = append(m.rows, row{header: "EPICS"})
+			for i := range msg.view.Epics {
+				e := msg.view.Epics[i]
+				m.rows = append(m.rows, row{entry: &e})
+			}
+		}
+	} else {
+		header := strings.ToUpper(msg.filter.label())
+		m.rows = append(m.rows, row{header: fmt.Sprintf("%s (%d)", header, len(msg.entries))})
+		for i := range msg.entries {
+			e := msg.entries[i]
 			m.rows = append(m.rows, row{entry: &e})
 		}
 	}
@@ -195,24 +237,43 @@ func formatCardRow(e index.Entry) string {
 	)
 }
 
-// reloadedMsg is sent by reloadCmd when a fresh BoardView has been
-// fetched from disk. The model swaps it in via applyReload.
+// reloadedMsg carries fresh board data and the filter mode it was
+// fetched under. Exactly one of view (kanban-shaped) or entries
+// (flat list) is non-nil, depending on filter.
 type reloadedMsg struct {
-	view *board.BoardView
+	filter  filterMode
+	view    *board.BoardView
+	entries []index.Entry
 }
 
 // statusMsg sets the bottom-bar ephemeral status (e.g. "card #7
 // activated"). Cleared by the next reload.
 type statusMsg string
 
-// reloadCmd asks Bubble Tea to fetch a fresh BoardView. Wrapped as a
-// command so it runs off the message-handling goroutine.
-func reloadCmd(b *board.Board) tea.Cmd {
+// reloadCmd fetches the data appropriate for filter f. filterInFlight
+// uses Board() (the kanban shape); the others use List().
+func reloadCmd(b *board.Board, f filterMode) tea.Cmd {
 	return func() tea.Msg {
-		v, err := b.Board()
-		if err != nil {
-			return statusMsg("reload error: " + err.Error())
+		switch f {
+		case filterInFlight:
+			v, err := b.Board()
+			if err != nil {
+				return statusMsg("reload error: " + err.Error())
+			}
+			return reloadedMsg{filter: f, view: v}
+		default:
+			opts := board.ListOpts{}
+			switch f {
+			case filterDone:
+				opts.Status = card.StatusDone
+			case filterArchived:
+				opts.Status = card.StatusArchived
+			}
+			es, err := b.List(opts)
+			if err != nil {
+				return statusMsg("reload error: " + err.Error())
+			}
+			return reloadedMsg{filter: f, entries: es}
 		}
-		return reloadedMsg{view: v}
 	}
 }

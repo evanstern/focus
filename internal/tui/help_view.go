@@ -31,6 +31,8 @@ func newHelpModel() helpModel {
 	b.WriteString("  d              done (active -> done)\n")
 	b.WriteString("  K              kill (any -> archived)  [capital K]\n")
 	b.WriteString("  r              revive (archived -> backlog)\n\n")
+	b.WriteString("FILTER\n")
+	b.WriteString("  tab            cycle in-flight \u2192 all \u2192 done \u2192 archived\n\n")
 	b.WriteString("MODES\n")
 	b.WriteString("  /              search\n")
 	b.WriteString("  :              command-mode\n")

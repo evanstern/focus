@@ -93,6 +93,9 @@ func (m *Model) handleBoardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "N":
 		m.advanceSearchMatch(-1)
 		m.refreshPreview()
+	case "tab":
+		next := m.board_.filter.next()
+		return m, reloadCmd(m.board, next)
 	}
 	return m, nil
 }
@@ -236,15 +239,13 @@ func (m *Model) transitionCmd(name string) tea.Cmd {
 		return nil
 	}
 	id := e.ID
+	board_ := m.board
+	filter := m.board_.filter
 	return func() tea.Msg {
-		if err := runTransition(m.board, name, id); err != nil {
+		if err := runTransition(board_, name, id); err != nil {
 			return statusMsg(err.Error())
 		}
-		v, err := m.board.Board()
-		if err != nil {
-			return statusMsg("reload: " + err.Error())
-		}
-		return reloadedMsg{view: v}
+		return reloadCmd(board_, filter)()
 	}
 }
 
@@ -290,31 +291,25 @@ func (m *Model) runCommandLine(line string) tea.Cmd {
 	case "q", "quit":
 		return tea.Quit
 	case "reindex":
+		board_ := m.board
+		filter := m.board_.filter
 		return func() tea.Msg {
-			if _, err := m.board.Reindex(); err != nil {
+			if _, err := board_.Reindex(); err != nil {
 				return statusMsg("reindex: " + err.Error())
 			}
-			v, err := m.board.Board()
-			if err != nil {
-				return statusMsg("reload: " + err.Error())
-			}
-			return reloadedMsg{view: v}
+			return reloadCmd(board_, filter)()
 		}
 	case "new":
 		if rest == "" {
 			return func() tea.Msg { return statusMsg("usage: :new <title>") }
 		}
+		board_ := m.board
+		filter := m.board_.filter
 		return func() tea.Msg {
-			c, _, err := m.board.NewCard(rest, board.NewCardOpts{})
-			if err != nil {
+			if _, _, err := board_.NewCard(rest, board.NewCardOpts{}); err != nil {
 				return statusMsg("new: " + err.Error())
 			}
-			v, err := m.board.Board()
-			if err != nil {
-				return statusMsg("reload: " + err.Error())
-			}
-			_ = c
-			return reloadedMsg{view: v}
+			return reloadCmd(board_, filter)()
 		}
 	}
 

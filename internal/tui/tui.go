@@ -97,7 +97,7 @@ func newModel(b *board.Board) (*Model, error) {
 // Init is Bubble Tea's startup hook. We use it to fire off the first
 // board reload so the screen has data before any keystroke.
 func (m *Model) Init() tea.Cmd {
-	return reloadCmd(m.board)
+	return reloadCmd(m.board, m.board_.filter)
 }
 
 // Update routes messages to handlers. Cursor movement in the board
@@ -125,7 +125,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.id != 0 {
 			m.preview.invalidate(msg.id)
 		}
-		return m, reloadCmd(m.board)
+		return m, reloadCmd(m.board, m.board_.filter)
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -209,7 +209,7 @@ func (m *Model) statusLine() string {
 	var mode string
 	switch m.input {
 	case modeNormal:
-		mode = "[NORMAL]"
+		mode = fmt.Sprintf("[%s]", m.board_.filter.label())
 	case modeSearch:
 		mode = "/" + m.search.query
 	case modeCommand:
@@ -218,7 +218,7 @@ func (m *Model) statusLine() string {
 	if m.status != "" {
 		return fmt.Sprintf("%s  %s", mode, m.status)
 	}
-	hint := "j/k move  e edit  a/p/d/K/r transition  /search  :command  ?help  q quit"
+	hint := "j/k move  tab cycle  e edit  a/p/d/K/r transition  /search  :command  ?help  q quit"
 	return fmt.Sprintf("%s  %s", mode, hint)
 }
 
