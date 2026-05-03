@@ -73,6 +73,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runEpic(rest, stdout, stderr)
 	case "mcp":
 		return runMCP(rest, stdout, stderr)
+	case "tui":
+		return runTUI(rest, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "focus: unknown command %q. try `focus help`.\n", cmd)
 		return 2
@@ -133,6 +135,9 @@ EPICS
   epic list                Summary of all epics in this board.
   epic add <epic-id> <card-id>
                            Set epic: on a card.
+
+TUI
+  tui                      Open the interactive board (vim keybinds).
 
 MCP
   mcp serve                JSON-RPC over stdio for MCP clients.
