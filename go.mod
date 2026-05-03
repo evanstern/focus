@@ -7,5 +7,6 @@ require gopkg.in/yaml.v3 v3.0.1
 require (
 	github.com/gofrs/flock v0.12.1 // indirect
 	github.com/google/renameio/v2 v2.0.1 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	golang.org/x/sys v0.22.0 // indirect
 )
