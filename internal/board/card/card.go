@@ -257,7 +257,7 @@ func Marshal(c *Card) ([]byte, error) {
 	out.WriteString("---\n")
 	out.Write(fm.Bytes())
 	out.WriteString("---\n")
-	out.WriteString(c.Body)
+	out.WriteString(NormalizeBody(c.Body))
 	return out.Bytes(), nil
 }
 
