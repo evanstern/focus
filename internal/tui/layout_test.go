@@ -40,6 +40,14 @@ func TestPadPaneLinesProducesRectangle(t *testing.T) {
 	}
 }
 
+// firstLineRowCount counts the number of border-top corner glyphs
+// in the first row. Two corners means side-by-side (two panes
+// horizontal), one corner means stacked.
+func topRowCornerCount(out string) int {
+	first := strings.SplitN(out, "\n", 2)[0]
+	return strings.Count(first, "╭")
+}
+
 func TestRenderSplitAutoWidePicksHorizontal(t *testing.T) {
 	b := setupBoard(t)
 	m, _ := newModel(b)
@@ -48,9 +56,9 @@ func TestRenderSplitAutoWidePicksHorizontal(t *testing.T) {
 	m = updated.(*Model)
 
 	out := renderSplit(splitAuto, 200, 20, &m.board_, &m.preview)
-	firstLine := strings.SplitN(out, "\n", 2)[0]
-	if !strings.Contains(firstLine, "ACTIVE") || !strings.Contains(firstLine, "#0001") {
-		t.Errorf("auto+wide didn't go horizontal; first line = %q", firstLine)
+	if got := topRowCornerCount(out); got != 2 {
+		t.Errorf("auto+wide top-row corners = %d, want 2 (horizontal): %q",
+			got, strings.SplitN(out, "\n", 2)[0])
 	}
 }
 
@@ -61,10 +69,9 @@ func TestRenderSplitAutoNarrowPicksVertical(t *testing.T) {
 	updated, _ := m.Update(reloadedMsg{view: v})
 	m = updated.(*Model)
 
-	const termWidth = 50
-	out := renderSplit(splitAuto, termWidth, 20, &m.board_, &m.preview)
-	if !strings.Contains(out, strings.Repeat("─", termWidth)) {
-		t.Errorf("auto+narrow didn't go vertical: %q", out)
+	out := renderSplit(splitAuto, 50, 20, &m.board_, &m.preview)
+	if got := topRowCornerCount(out); got != 1 {
+		t.Errorf("auto+narrow top-row corners = %d, want 1 (vertical)", got)
 	}
 }
 
@@ -76,9 +83,8 @@ func TestRenderSplitForcedHorizontalOnNarrowTerminal(t *testing.T) {
 	m = updated.(*Model)
 
 	out := renderSplit(splitHorizontal, 80, 20, &m.board_, &m.preview)
-	firstLine := strings.SplitN(out, "\n", 2)[0]
-	if !strings.Contains(firstLine, "ACTIVE") || !strings.Contains(firstLine, "#0001") {
-		t.Errorf("forced horizontal didn't side-by-side; first line = %q", firstLine)
+	if got := topRowCornerCount(out); got != 2 {
+		t.Errorf("forced horizontal top-row corners = %d, want 2", got)
 	}
 }
 
@@ -90,8 +96,8 @@ func TestRenderSplitForcedVerticalOnWideTerminal(t *testing.T) {
 	m = updated.(*Model)
 
 	out := renderSplit(splitVertical, 200, 20, &m.board_, &m.preview)
-	if !strings.Contains(out, strings.Repeat("─", 200)) {
-		t.Error("forced vertical didn't stack")
+	if got := topRowCornerCount(out); got != 1 {
+		t.Errorf("forced vertical top-row corners = %d, want 1 (stacked)", got)
 	}
 }
 

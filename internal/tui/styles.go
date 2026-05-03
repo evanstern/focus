@@ -13,6 +13,7 @@ var styles = struct {
 	priority [4]lipgloss.Style
 	dim      lipgloss.Style
 	statusBg lipgloss.Style
+	border   lipgloss.Style
 }{
 	header: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7aa2f7")),
 	cursor: lipgloss.NewStyle().Background(lipgloss.Color("#3b4261")).Foreground(lipgloss.Color("#ffffff")),
@@ -24,6 +25,7 @@ var styles = struct {
 	},
 	dim:      lipgloss.NewStyle().Foreground(lipgloss.Color("#888")),
 	statusBg: lipgloss.NewStyle().Foreground(lipgloss.Color("#aaa")),
+	border:   lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#444")),
 }
 
 // priorityStyle returns the lipgloss style to apply to a priority

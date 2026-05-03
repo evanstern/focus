@@ -35,24 +35,29 @@ func renderSplit(mode splitMode, width, height int, nav *boardModel, prev *previ
 	return renderVertical(width, height, nav, prev)
 }
 
+// borderChrome is the space borders consume around a pane: 2 columns
+// (left + right border) and 2 rows (top + bottom border).
+const borderChrome = 2
+
 func renderHorizontal(width, height int, nav *boardModel, prev *previewModel) string {
-	navW := navNaturalWidth
-	if navW > width-21 {
-		navW = width - 21
+	navOuter := navNaturalWidth + borderChrome
+	if navOuter > width-(20+borderChrome) {
+		navOuter = width - (20 + borderChrome)
 	}
-	if navW < 20 {
-		navW = 20
+	if navOuter < 20+borderChrome {
+		navOuter = 20 + borderChrome
 	}
-	previewW := width - navW - 1
+	previewOuter := width - navOuter
 
-	gutter := " "
-	left := nav.view(navW, height)
-	right := prev.view(previewW, height)
+	innerHeight := height - borderChrome
+	if innerHeight < 1 {
+		innerHeight = 1
+	}
 
-	left = padPaneLines(left, navW, height)
-	right = padPaneLines(right, previewW, height)
+	left := borderedPane(nav.view(navOuter-borderChrome, innerHeight), navOuter-borderChrome, innerHeight)
+	right := borderedPane(prev.view(previewOuter-borderChrome, innerHeight), previewOuter-borderChrome, innerHeight)
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, gutter, right)
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 }
 
 func renderVertical(width, height int, nav *boardModel, prev *previewModel) string {
@@ -60,23 +65,34 @@ func renderVertical(width, height int, nav *boardModel, prev *previewModel) stri
 }
 
 func renderStacked(width, height int, nav *boardModel, prev *previewModel) string {
-	navHeight := height / 2
-	previewHeight := height - navHeight - 1
-	if navHeight < 3 {
-		navHeight = 3
+	navOuterH := height / 2
+	previewOuterH := height - navOuterH
+	if navOuterH < 3+borderChrome {
+		navOuterH = 3 + borderChrome
 	}
-	if previewHeight < 1 {
-		previewHeight = 1
+	if previewOuterH < 1+borderChrome {
+		previewOuterH = 1 + borderChrome
 	}
 
-	top := nav.view(width, navHeight)
-	bottom := prev.view(width, previewHeight)
+	innerW := width - borderChrome
+	if innerW < 1 {
+		innerW = 1
+	}
 
-	top = padPaneLines(top, width, navHeight)
-	bottom = padPaneLines(bottom, width, previewHeight)
+	top := borderedPane(nav.view(innerW, navOuterH-borderChrome), innerW, navOuterH-borderChrome)
+	bottom := borderedPane(prev.view(innerW, previewOuterH-borderChrome), innerW, previewOuterH-borderChrome)
 
-	separator := strings.Repeat("─", width)
-	return lipgloss.JoinVertical(lipgloss.Left, top, separator, bottom)
+	return lipgloss.JoinVertical(lipgloss.Left, top, bottom)
+}
+
+// borderedPane wraps content in a rounded gray border, padding the
+// content to exactly innerW × innerH first so the bordered output is
+// a clean rectangle. Without the explicit pad, lipgloss's border
+// would size itself to the longest line and cause the layout to
+// shift on every cursor move.
+func borderedPane(content string, innerW, innerH int) string {
+	padded := padPaneLines(content, innerW, innerH)
+	return styles.border.Render(padded)
 }
 
 // padPaneLines pads each line of s to width and pads the line count

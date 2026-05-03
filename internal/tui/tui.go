@@ -253,25 +253,37 @@ func (m *Model) refreshPreview() {
 }
 
 // View renders the screen. Help overlays everything; otherwise we
-// render the split board layout.
+// render the bordered split board layout above a bordered status bar.
 func (m *Model) View() string {
 	if m.view == viewHelp {
-		return m.help.view() + "\n" + m.statusLine()
+		return m.help.view() + "\n" + m.renderStatusBar()
 	}
-	bodyHeight := m.height - statusBarHeight
+	bodyHeight := m.height - statusBarOuterHeight
 	if bodyHeight < 1 {
 		bodyHeight = 1
 	}
 	body := renderSplit(m.split, m.width, bodyHeight, &m.board_, &m.preview)
-	return body + "\n" + m.statusLine()
+	return body + "\n" + m.renderStatusBar()
 }
 
-// statusBarHeight reserves rows at the bottom of the screen for the
-// status line + mode indicator.
-const statusBarHeight = 2
+// statusBarOuterHeight is the row budget the bordered status bar
+// consumes: 1 line of content + 2 lines of border.
+const statusBarOuterHeight = 3
 
-// statusLine renders the bottom bar.
-func (m *Model) statusLine() string {
+// renderStatusBar produces the bottom-bar widget: a single line of
+// mode + hint/status, wrapped in the same rounded border as the
+// nav and preview panes.
+func (m *Model) renderStatusBar() string {
+	innerW := m.width - borderChrome
+	if innerW < 1 {
+		innerW = 1
+	}
+	return borderedPane(m.statusContent(), innerW, 1)
+}
+
+// statusContent is the single status-bar content line, without
+// border or padding.
+func (m *Model) statusContent() string {
 	var mode string
 	switch m.input {
 	case modeNormal:
