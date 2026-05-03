@@ -31,17 +31,25 @@ func newCommandState() commandState { return commandState{} }
 func (c *commandState) reset() { c.input = "" }
 
 // handleBoardKey handles normal-mode keys for the split board.
-// Cursor movement triggers a preview reload via refreshPreview() —
-// preview always reflects whatever's under the nav cursor.
+// Movement keys (j/k/gg/G/ctrl+d/u/f/b) route to whichever pane has
+// focus: nav when m.focused == focusNav (cursor moves and preview
+// reloads), preview when m.focused == focusPreview (viewport scrolls).
+// Filter cycle, transitions, search, command-mode, edit and quit work
+// regardless of focused pane.
 func (m *Model) handleBoardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
 	// gg sequence: track whether the previous keystroke was "g" so
-	// a second "g" jumps to top. Any other key clears the flag.
+	// a second "g" jumps to top of whichever pane is focused. Any
+	// other key clears the flag.
 	if key == "g" {
 		if m.gPending {
-			m.board_.gotoFirstCard()
-			m.refreshPreview()
+			if m.focused == focusPreview {
+				m.preview.scrollToTop()
+			} else {
+				m.board_.gotoFirstCard()
+				m.refreshPreview()
+			}
 			m.gPending = false
 			return m, nil
 		}
@@ -53,21 +61,55 @@ func (m *Model) handleBoardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q":
 		return m, tea.Quit
+	case "tab":
+		m.focused = (m.focused + 1) % numPanes
+		return m, nil
+	case "shift+tab":
+		m.focused = (m.focused + numPanes - 1) % numPanes
+		return m, nil
 	case "j", "down":
-		m.board_.moveCursor(1)
-		m.refreshPreview()
+		if m.focused == focusPreview {
+			m.preview.scrollLineDown()
+		} else {
+			m.board_.moveCursor(1)
+			m.refreshPreview()
+		}
 	case "k", "up":
-		m.board_.moveCursor(-1)
-		m.refreshPreview()
+		if m.focused == focusPreview {
+			m.preview.scrollLineUp()
+		} else {
+			m.board_.moveCursor(-1)
+			m.refreshPreview()
+		}
 	case "G":
-		m.board_.gotoLastCard()
-		m.refreshPreview()
+		if m.focused == focusPreview {
+			m.preview.scrollToBottom()
+		} else {
+			m.board_.gotoLastCard()
+			m.refreshPreview()
+		}
 	case "ctrl+d", "pgdown":
-		m.board_.moveCursor(10)
-		m.refreshPreview()
+		if m.focused == focusPreview {
+			m.preview.scrollHalfPageDown()
+		} else {
+			m.board_.moveCursor(10)
+			m.refreshPreview()
+		}
 	case "ctrl+u", "pgup":
-		m.board_.moveCursor(-10)
-		m.refreshPreview()
+		if m.focused == focusPreview {
+			m.preview.scrollHalfPageUp()
+		} else {
+			m.board_.moveCursor(-10)
+			m.refreshPreview()
+		}
+	case "ctrl+f":
+		if m.focused == focusPreview {
+			m.preview.scrollPageDown()
+		}
+	case "ctrl+b":
+		if m.focused == focusPreview {
+			m.preview.scrollPageUp()
+		}
 	case "/":
 		m.input = modeSearch
 		m.search.query = ""
@@ -90,10 +132,10 @@ func (m *Model) handleBoardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.transitionCmd("kill")
 	case "r":
 		return m, m.transitionCmd("revive")
-	case "tab", "l":
+	case "l":
 		next := m.board_.filter.next()
 		return m, reloadCmd(m.board, next, 0)
-	case "shift+tab", "h":
+	case "h":
 		prev := m.board_.filter.prev()
 		return m, reloadCmd(m.board, prev, 0)
 	case "s":

@@ -55,7 +55,7 @@ func TestRenderSplitAutoWidePicksHorizontal(t *testing.T) {
 	updated, _ := m.Update(reloadedMsg{view: v})
 	m = updated.(*Model)
 
-	out := renderSplit(splitAuto, 200, 20, &m.board_, &m.preview)
+	out := renderSplit(splitAuto, 200, 20, focusNav, &m.board_, &m.preview)
 	if got := topRowCornerCount(out); got != 2 {
 		t.Errorf("auto+wide top-row corners = %d, want 2 (horizontal): %q",
 			got, strings.SplitN(out, "\n", 2)[0])
@@ -69,7 +69,7 @@ func TestRenderSplitAutoNarrowPicksVertical(t *testing.T) {
 	updated, _ := m.Update(reloadedMsg{view: v})
 	m = updated.(*Model)
 
-	out := renderSplit(splitAuto, 50, 20, &m.board_, &m.preview)
+	out := renderSplit(splitAuto, 50, 20, focusNav, &m.board_, &m.preview)
 	if got := topRowCornerCount(out); got != 1 {
 		t.Errorf("auto+narrow top-row corners = %d, want 1 (vertical)", got)
 	}
@@ -82,7 +82,7 @@ func TestRenderSplitForcedHorizontalOnNarrowTerminal(t *testing.T) {
 	updated, _ := m.Update(reloadedMsg{view: v})
 	m = updated.(*Model)
 
-	out := renderSplit(splitHorizontal, 80, 20, &m.board_, &m.preview)
+	out := renderSplit(splitHorizontal, 80, 20, focusNav, &m.board_, &m.preview)
 	if got := topRowCornerCount(out); got != 2 {
 		t.Errorf("forced horizontal top-row corners = %d, want 2", got)
 	}
@@ -95,7 +95,7 @@ func TestRenderSplitForcedVerticalOnWideTerminal(t *testing.T) {
 	updated, _ := m.Update(reloadedMsg{view: v})
 	m = updated.(*Model)
 
-	out := renderSplit(splitVertical, 200, 20, &m.board_, &m.preview)
+	out := renderSplit(splitVertical, 200, 20, focusNav, &m.board_, &m.preview)
 	if got := topRowCornerCount(out); got != 1 {
 		t.Errorf("forced vertical top-row corners = %d, want 1 (stacked)", got)
 	}

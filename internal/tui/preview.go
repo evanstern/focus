@@ -7,21 +7,34 @@ import (
 	"github.com/evanstern/focus/internal/board"
 	"github.com/evanstern/focus/internal/board/card"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/glamour"
 )
 
-// previewModel renders a single card's frontmatter header + body
-// alongside the nav pane. Auto-fits to the available width and
-// height; no scrolling. Long bodies clip — that's what `e` (open in
-// $EDITOR) is for.
+// previewModel renders a single card's frontmatter header + body in
+// a scrollable viewport alongside the nav pane. When the preview
+// pane has keyboard focus, vim scroll keys move the viewport's
+// YOffset; otherwise it just sits at whatever offset it was last
+// scrolled to (and is reset to top whenever a different card is
+// loaded).
 type previewModel struct {
 	board *board.Board
 	card  *card.Card
+
+	// viewport owns the scroll bounds + half/full-page math. We
+	// SetContent on every load and on every resize (because glamour
+	// reflows on width changes and so does the header width math).
+	viewport viewport.Model
 
 	// rendered caches the glamour-rendered body keyed by card id +
 	// wrap width. Width is in the key because glamour reflows on
 	// resize and the wrapped output is what we want to cache.
 	rendered map[previewKey]string
+
+	// lastWidth/lastHeight track what we last sized the viewport to,
+	// so we only re-set content when the layout actually changes.
+	lastWidth  int
+	lastHeight int
 }
 
 type previewKey struct {
@@ -30,18 +43,35 @@ type previewKey struct {
 }
 
 func newPreviewModel(b *board.Board) previewModel {
-	return previewModel{board: b, rendered: make(map[previewKey]string)}
+	return previewModel{
+		board:    b,
+		viewport: viewport.New(0, 0),
+		rendered: make(map[previewKey]string),
+	}
 }
 
 // load fetches a card by id. Cheap to call on every cursor move; the
 // board package reads from the disk file each time, but we cache the
 // glamour render which is the expensive bit.
+//
+// Resets the viewport scroll position to top whenever the loaded
+// card's id changes — by design, we don't preserve per-card scroll
+// across cursor moves.
 func (m *previewModel) load(id int) error {
 	c, _, err := m.board.LoadCard(id)
 	if err != nil {
 		return err
 	}
+	prevID := 0
+	if m.card != nil {
+		prevID = m.card.ID
+	}
 	m.card = c
+	if prevID != c.ID {
+		m.viewport.SetYOffset(0)
+		m.lastWidth = 0
+		m.lastHeight = 0
+	}
 	return nil
 }
 
@@ -52,10 +82,10 @@ const (
 	previewPadY = 1
 )
 
-// view renders the preview pane to fit width × height. The body is
-// wrapped to (width - 2*previewPadX) so paragraph-shaped on-disk
-// content reflows for the available pane size, with breathing room
-// inside the border.
+// view renders the preview pane to fit width × height. The viewport
+// occupies the area inside the (previewPadX, previewPadY) inset; the
+// glamour-rendered body wraps to viewport.Width - 2 to match the
+// pre-viewport convention.
 func (m *previewModel) view(width, height int) string {
 	if m.card == nil {
 		return ""
@@ -73,6 +103,21 @@ func (m *previewModel) view(width, height int) string {
 		innerH = 1
 	}
 
+	if innerW != m.lastWidth || innerH != m.lastHeight {
+		m.viewport.Width = innerW
+		m.viewport.Height = innerH
+		m.viewport.SetContent(m.buildContent(innerW))
+		m.lastWidth = innerW
+		m.lastHeight = innerH
+	}
+
+	return padInsidePane(m.viewport.View(), previewPadX, previewPadY)
+}
+
+// buildContent assembles the full scrollable string for the viewport:
+// frontmatter header followed by the glamour-rendered body. innerW
+// is the viewport's content width.
+func (m *previewModel) buildContent(innerW int) string {
 	var b strings.Builder
 	c := m.card
 	fmt.Fprintf(&b, "#%s  %s\n", card.PaddedID(c.ID), c.Title)
@@ -98,8 +143,7 @@ func (m *previewModel) view(width, height int) string {
 	}
 	b.WriteString("\n")
 	b.WriteString(m.renderBody(innerW))
-
-	return padInsidePane(clipToHeight(b.String(), innerH), previewPadX, previewPadY)
+	return b.String()
 }
 
 // padInsidePane prepends padX spaces to every line and adds padY
@@ -115,11 +159,10 @@ func padInsidePane(s string, padX, padY int) string {
 		lines[i] = xPad + line
 	}
 	if padY > 0 {
-		blank := strings.Repeat("", 0)
 		var top, bottom []string
 		for i := 0; i < padY; i++ {
-			top = append(top, blank)
-			bottom = append(bottom, blank)
+			top = append(top, "")
+			bottom = append(bottom, "")
 		}
 		lines = append(top, append(lines, bottom...)...)
 	}
@@ -158,25 +201,28 @@ func (m *previewModel) renderBody(width int) string {
 	return out
 }
 
-// invalidate drops cached renders for this card. Called after
-// transitions or edits where the on-disk content may have changed.
+// invalidate drops cached renders for this card and resets the
+// viewport scroll position to top. Called after transitions or
+// edits where the on-disk content may have changed.
 func (m *previewModel) invalidate(id int) {
 	for k := range m.rendered {
 		if k.id == id {
 			delete(m.rendered, k)
 		}
 	}
+	m.lastWidth = 0
+	m.lastHeight = 0
+	m.viewport.SetYOffset(0)
 }
 
-// clipToHeight returns at most n lines of s. Used to keep the
-// preview pane from overflowing the layout when the body is long.
-func clipToHeight(s string, n int) string {
-	if n <= 0 {
-		return ""
-	}
-	lines := strings.Split(s, "\n")
-	if len(lines) <= n {
-		return s
-	}
-	return strings.Join(lines[:n], "\n")
-}
+// scrollLineDown / scrollLineUp / scrollHalfPageDown etc. wrap the
+// viewport's scroll methods so the key handler doesn't have to
+// reach through previewModel.viewport directly.
+func (m *previewModel) scrollLineDown()     { m.viewport.LineDown(1) }
+func (m *previewModel) scrollLineUp()       { m.viewport.LineUp(1) }
+func (m *previewModel) scrollHalfPageDown() { m.viewport.HalfPageDown() }
+func (m *previewModel) scrollHalfPageUp()   { m.viewport.HalfPageUp() }
+func (m *previewModel) scrollPageDown()     { m.viewport.PageDown() }
+func (m *previewModel) scrollPageUp()       { m.viewport.PageUp() }
+func (m *previewModel) scrollToTop()        { m.viewport.GotoTop() }
+func (m *previewModel) scrollToBottom()     { m.viewport.GotoBottom() }

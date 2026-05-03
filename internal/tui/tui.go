@@ -92,6 +92,17 @@ const (
 	modeCommand
 )
 
+// focusedPane is which pane currently owns the keyboard for
+// movement. Tab cycles it; the visual indicator is an accent border.
+// Default on TUI entry is focusNav.
+type focusedPane int
+
+const (
+	focusNav focusedPane = iota
+	focusPreview
+	numPanes = 2
+)
+
 // splitMode controls how the nav and preview panes are arranged.
 // 's' cycles auto -> horizontal -> vertical -> auto. Auto picks
 // horizontal when the terminal is wide enough for both panes,
@@ -125,9 +136,10 @@ const autoSplitThreshold = 120
 type Model struct {
 	board *board.Board
 
-	view  viewMode
-	input inputMode
-	split splitMode
+	view    viewMode
+	input   inputMode
+	split   splitMode
+	focused focusedPane
 
 	width  int
 	height int
@@ -265,7 +277,7 @@ func (m *Model) View() string {
 	if bodyHeight < 1 {
 		bodyHeight = 1
 	}
-	body := renderSplit(m.split, m.width, bodyHeight, &m.board_, &m.preview)
+	body := renderSplit(m.split, m.width, bodyHeight, m.focused, &m.board_, &m.preview)
 	return body + "\n" + m.renderStatusBar()
 }
 
@@ -281,7 +293,7 @@ func (m *Model) renderStatusBar() string {
 	if innerW < 1 {
 		innerW = 1
 	}
-	return borderedPane(m.statusContent(), innerW, 1)
+	return borderedPane(m.statusContent(), innerW, 1, false)
 }
 
 // statusContent is the single status-bar content line, without
@@ -299,7 +311,7 @@ func (m *Model) statusContent() string {
 	if m.status != "" {
 		return fmt.Sprintf("%s  %s", mode, m.status)
 	}
-	hint := "j/k move  h/l filter  s layout  e edit  a/p/d/K/r transition  /search  :command  ?help  q quit"
+	hint := "tab focus  j/k move/scroll  h/l filter  s layout  e edit  a/p/d/K/r transition  /search  :command  ?help  q quit"
 	return fmt.Sprintf("%s  %s", mode, hint)
 }
 

@@ -14,8 +14,9 @@ const navNaturalWidth = 80
 // renderSplit composes nav + preview using the requested splitMode.
 // Auto picks horizontal when width >= autoSplitThreshold, vertical
 // otherwise. Horizontal gives nav up to navNaturalWidth and the rest
-// to preview. Vertical splits the body height in half.
-func renderSplit(mode splitMode, width, height int, nav *boardModel, prev *previewModel) string {
+// to preview. Vertical splits the body height in half. focused
+// controls which pane gets the accent border.
+func renderSplit(mode splitMode, width, height int, focused focusedPane, nav *boardModel, prev *previewModel) string {
 	if width <= 0 || height <= 0 {
 		return ""
 	}
@@ -30,16 +31,16 @@ func renderSplit(mode splitMode, width, height int, nav *boardModel, prev *previ
 	}
 
 	if effective == splitHorizontal {
-		return renderHorizontal(width, height, nav, prev)
+		return renderHorizontal(width, height, focused, nav, prev)
 	}
-	return renderVertical(width, height, nav, prev)
+	return renderVertical(width, height, focused, nav, prev)
 }
 
 // borderChrome is the space borders consume around a pane: 2 columns
 // (left + right border) and 2 rows (top + bottom border).
 const borderChrome = 2
 
-func renderHorizontal(width, height int, nav *boardModel, prev *previewModel) string {
+func renderHorizontal(width, height int, focused focusedPane, nav *boardModel, prev *previewModel) string {
 	navOuter := navNaturalWidth + borderChrome
 	if navOuter > width-(20+borderChrome) {
 		navOuter = width - (20 + borderChrome)
@@ -54,17 +55,17 @@ func renderHorizontal(width, height int, nav *boardModel, prev *previewModel) st
 		innerHeight = 1
 	}
 
-	left := borderedPane(nav.view(navOuter-borderChrome, innerHeight), navOuter-borderChrome, innerHeight)
-	right := borderedPane(prev.view(previewOuter-borderChrome, innerHeight), previewOuter-borderChrome, innerHeight)
+	left := borderedPane(nav.view(navOuter-borderChrome, innerHeight), navOuter-borderChrome, innerHeight, focused == focusNav)
+	right := borderedPane(prev.view(previewOuter-borderChrome, innerHeight), previewOuter-borderChrome, innerHeight, focused == focusPreview)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 }
 
-func renderVertical(width, height int, nav *boardModel, prev *previewModel) string {
-	return renderStacked(width, height, nav, prev)
+func renderVertical(width, height int, focused focusedPane, nav *boardModel, prev *previewModel) string {
+	return renderStacked(width, height, focused, nav, prev)
 }
 
-func renderStacked(width, height int, nav *boardModel, prev *previewModel) string {
+func renderStacked(width, height int, focused focusedPane, nav *boardModel, prev *previewModel) string {
 	navOuterH := height / 2
 	previewOuterH := height - navOuterH
 	if navOuterH < 3+borderChrome {
@@ -79,19 +80,23 @@ func renderStacked(width, height int, nav *boardModel, prev *previewModel) strin
 		innerW = 1
 	}
 
-	top := borderedPane(nav.view(innerW, navOuterH-borderChrome), innerW, navOuterH-borderChrome)
-	bottom := borderedPane(prev.view(innerW, previewOuterH-borderChrome), innerW, previewOuterH-borderChrome)
+	top := borderedPane(nav.view(innerW, navOuterH-borderChrome), innerW, navOuterH-borderChrome, focused == focusNav)
+	bottom := borderedPane(prev.view(innerW, previewOuterH-borderChrome), innerW, previewOuterH-borderChrome, focused == focusPreview)
 
 	return lipgloss.JoinVertical(lipgloss.Left, top, bottom)
 }
 
-// borderedPane wraps content in a rounded gray border, padding the
+// borderedPane wraps content in a rounded border, padding the
 // content to exactly innerW × innerH first so the bordered output is
 // a clean rectangle. Without the explicit pad, lipgloss's border
 // would size itself to the longest line and cause the layout to
-// shift on every cursor move.
-func borderedPane(content string, innerW, innerH int) string {
+// shift on every cursor move. focused selects the accent border
+// color (yellow) over the default gray.
+func borderedPane(content string, innerW, innerH int, focused bool) string {
 	padded := padPaneLines(content, innerW, innerH)
+	if focused {
+		return styles.borderFocused.Render(padded)
+	}
 	return styles.border.Render(padded)
 }
 
