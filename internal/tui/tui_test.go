@@ -62,21 +62,40 @@ func TestModelBoardCursorMovement(t *testing.T) {
 	}
 }
 
-func TestModelEnterOpensDetail(t *testing.T) {
+func TestPreviewLoadsOnCursorMove(t *testing.T) {
 	b := setupBoard(t)
 	m, _ := newModel(b)
 	v, _ := b.Board()
 	updated, _ := m.Update(reloadedMsg{view: v})
 	m = updated.(*Model)
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.preview.card == nil {
+		t.Fatal("preview not loaded after initial reload")
+	}
+	first := m.preview.card.ID
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	m = updated.(*Model)
-	if m.view != viewDetail {
-		t.Errorf("view = %v, want detail", m.view)
+	if m.preview.card == nil || m.preview.card.ID == first {
+		t.Errorf("preview didn't follow cursor on j; got=%v", m.preview.card)
 	}
-	if m.detail.card == nil {
-		t.Error("detail card not loaded")
+}
+
+func TestEnterInvokesEditor(t *testing.T) {
+	b := setupBoard(t)
+	m, _ := newModel(b)
+	v, _ := b.Board()
+	updated, _ := m.Update(reloadedMsg{view: v})
+	m = updated.(*Model)
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("enter produced no command")
 	}
+	// Don't actually invoke the editor in tests — just confirm a
+	// command was produced. tea.ExecProcess returns a tea.Cmd that
+	// isn't safe to call here (it'd try to attach the test process to
+	// a TTY).
 }
 
 func TestModelHelpToggle(t *testing.T) {

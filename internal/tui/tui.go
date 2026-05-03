@@ -1,11 +1,11 @@
 // Package tui implements `focus tui`: a Bubble Tea TUI over the same
 // internal/board layer the CLI and MCP server use.
 //
-// Architecture: state enum + delegated Update/View. The top-level
-// model holds a viewMode and routes messages to the active sub-model
-// (board / detail / help). This is the pattern from
-// happytaoer/cli_kanban referenced in
-// wiki/decisions/focus-stack.md.
+// Layout: a split-pane board view. Nav (the card list) sits on the
+// left when the terminal is wide enough; otherwise nav stacks on top
+// of the preview. Cursor movement in the nav loads the highlighted
+// card into the preview pane on every keystroke. There's no separate
+// "detail view" mode — `e` and `enter` jump straight to $EDITOR.
 //
 // Vim keybindings are first-class per
 // wiki/decisions/focus-tui-keybinds.md. Arrows still work for users
@@ -14,6 +14,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 
 	"github.com/evanstern/focus/internal/board"
 
@@ -33,13 +35,12 @@ func Run(b *board.Board) error {
 	return err
 }
 
-// viewMode is the top-level state enum. Each value names a sub-model
-// the root delegates to. Modes are mutually exclusive.
+// viewMode is the top-level state enum. Two modes only: the split
+// board (with nav + preview) and a help overlay.
 type viewMode int
 
 const (
 	viewBoard viewMode = iota
-	viewDetail
 	viewHelp
 )
 
@@ -54,9 +55,14 @@ const (
 	modeCommand
 )
 
+// splitWidthThreshold is the minimum terminal width at which we
+// place nav + preview side-by-side. Below this the layout stacks
+// nav on top of preview. The nav row is ~80 chars wide, so we want
+// at least ~40 cols of preview alongside it — 120 total.
+const splitWidthThreshold = 120
+
 // Model is the root Bubble Tea model. Holds the resolved board, the
-// current view + input modes, and references to each sub-model so
-// Update can route messages to whichever is active.
+// current view + input modes, and references to each sub-model.
 type Model struct {
 	board *board.Board
 
@@ -67,13 +73,13 @@ type Model struct {
 	height int
 
 	board_  boardModel
-	detail  detailModel
+	preview previewModel
 	help    helpModel
 	search  searchState
 	command commandState
 
 	// status is the line at the bottom of the screen used for ephemeral
-	// feedback after a transition or error. Cleared on the next key.
+	// feedback after a transition or error. Cleared on the next reload.
 	status string
 }
 
@@ -87,7 +93,7 @@ func newModel(b *board.Board) (*Model, error) {
 		view:    viewBoard,
 		input:   modeNormal,
 		board_:  bm,
-		detail:  newDetailModel(b),
+		preview: newPreviewModel(b),
 		help:    newHelpModel(),
 		search:  newSearchState(),
 		command: newCommandState(),
@@ -100,26 +106,32 @@ func (m *Model) Init() tea.Cmd {
 	return reloadCmd(m.board)
 }
 
-// Update routes messages to the active sub-model's Update or handles
-// global shortcuts (quit, help, mode switches). Per Bubble Tea's
-// pattern, Update returns the (possibly mutated) model and an
-// optional command.
+// Update routes messages to handlers. Cursor movement in the board
+// triggers a preview reload as a side effect.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.detail.resize(m.width, m.height)
 		return m, nil
 
 	case reloadedMsg:
 		m.board_.applyReload(msg)
 		m.status = ""
+		m.refreshPreview()
 		return m, nil
 
 	case statusMsg:
 		m.status = string(msg)
 		return m, nil
+
+	case editFinishedMsg:
+		// $EDITOR exited; reload the card from disk in case the user
+		// changed body or frontmatter.
+		if msg.id != 0 {
+			m.preview.invalidate(msg.id)
+		}
+		return m, reloadCmd(m.board)
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -157,8 +169,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.view {
 	case viewBoard:
 		return m.handleBoardKey(msg)
-	case viewDetail:
-		return m.handleDetailKey(msg)
 	case viewHelp:
 		if msg.String() == "esc" || msg.String() == "q" {
 			m.view = viewBoard
@@ -168,27 +178,39 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// View dispatches to the active sub-model's View.
-func (m *Model) View() string {
-	var body string
-	switch m.view {
-	case viewBoard:
-		body = m.board_.view(m.width, m.height-statusBarHeight)
-	case viewDetail:
-		body = m.detail.view()
-	case viewHelp:
-		body = m.help.view()
+// refreshPreview asks the preview pane to load whatever card is
+// currently under the cursor. Called after the cursor moves and
+// after every reload.
+func (m *Model) refreshPreview() {
+	e := m.board_.selectedCard()
+	if e == nil {
+		m.preview.card = nil
+		return
 	}
+	if err := m.preview.load(e.ID); err != nil {
+		m.status = err.Error()
+	}
+}
+
+// View renders the screen. Help overlays everything; otherwise we
+// render the split board layout.
+func (m *Model) View() string {
+	if m.view == viewHelp {
+		return m.help.view() + "\n" + m.statusLine()
+	}
+	bodyHeight := m.height - statusBarHeight
+	if bodyHeight < 1 {
+		bodyHeight = 1
+	}
+	body := renderSplit(m.width, bodyHeight, &m.board_, &m.preview)
 	return body + "\n" + m.statusLine()
 }
 
 // statusBarHeight reserves rows at the bottom of the screen for the
-// status line + mode indicator. Bubble Tea's lipgloss layout pads
-// the body to fit.
+// status line + mode indicator.
 const statusBarHeight = 2
 
-// statusLine renders the bottom bar: input-mode indicator, ephemeral
-// status message, and (in search/command modes) the current input.
+// statusLine renders the bottom bar.
 func (m *Model) statusLine() string {
 	var mode string
 	switch m.input {
@@ -202,6 +224,33 @@ func (m *Model) statusLine() string {
 	if m.status != "" {
 		return fmt.Sprintf("%s  %s", mode, m.status)
 	}
-	hint := "j/k move  enter open  /search  :command  ?help  q quit"
+	hint := "j/k move  e edit  a/p/d/K/r transition  /search  :command  ?help  q quit"
 	return fmt.Sprintf("%s  %s", mode, hint)
+}
+
+// editFinishedMsg is sent by Bubble Tea after $EDITOR exits. Carries
+// the card id so the preview cache can be invalidated.
+type editFinishedMsg struct {
+	id  int
+	err error
+}
+
+// editCmd suspends the TUI, runs $EDITOR on the card's INDEX.md,
+// then resumes. tea.ExecProcess handles the suspend/resume dance;
+// we just supply the *exec.Cmd.
+func (m *Model) editCmd(id int) tea.Cmd {
+	dirName, err := m.board.FindCardDir(id)
+	if err != nil {
+		return func() tea.Msg { return statusMsg("edit: " + err.Error()) }
+	}
+	path := m.board.CardFile(dirName)
+
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = "vi"
+	}
+	cmd := exec.Command(editor, path)
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return editFinishedMsg{id: id, err: err}
+	})
 }

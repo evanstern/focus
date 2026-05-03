@@ -32,8 +32,9 @@ func newCommandState() commandState { return commandState{} }
 
 func (c *commandState) reset() { c.input = "" }
 
-// handleBoardKey handles normal-mode keys when the board view is on
-// screen. The vim mappings live here.
+// handleBoardKey handles normal-mode keys for the split board.
+// Cursor movement triggers a preview reload via refreshPreview() —
+// preview always reflects whatever's under the nav cursor.
 func (m *Model) handleBoardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
@@ -41,6 +42,7 @@ func (m *Model) handleBoardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if key == "g" {
 		if m.search.cursor == -1 {
 			m.board_.gotoFirstCard()
+			m.refreshPreview()
 			m.search.cursor = 0
 			return m, nil
 		}
@@ -54,25 +56,26 @@ func (m *Model) handleBoardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "j", "down":
 		m.board_.moveCursor(1)
+		m.refreshPreview()
 	case "k", "up":
 		m.board_.moveCursor(-1)
+		m.refreshPreview()
 	case "G":
 		m.board_.gotoLastCard()
+		m.refreshPreview()
 	case "ctrl+d", "pgdown":
 		m.board_.moveCursor(10)
+		m.refreshPreview()
 	case "ctrl+u", "pgup":
 		m.board_.moveCursor(-10)
+		m.refreshPreview()
 	case "/":
 		m.input = modeSearch
 		m.search.query = ""
 		m.search.matches = nil
-	case "enter", "o":
+	case "enter", "e", "o":
 		if e := m.board_.selectedCard(); e != nil {
-			if err := m.detail.load(e.ID); err != nil {
-				m.status = err.Error()
-				return m, nil
-			}
-			m.view = viewDetail
+			return m, m.editCmd(e.ID)
 		}
 	case "a":
 		return m, m.transitionCmd("activate")
@@ -86,42 +89,10 @@ func (m *Model) handleBoardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.transitionCmd("revive")
 	case "n":
 		m.advanceSearchMatch(1)
+		m.refreshPreview()
 	case "N":
 		m.advanceSearchMatch(-1)
-	}
-	return m, nil
-}
-
-// handleDetailKey handles keys inside the detail view: scroll the
-// glamour body, transition the displayed card, or back out to the
-// board.
-func (m *Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "q":
-		m.view = viewBoard
-		return m, nil
-	case "j", "down":
-		m.detail.viewport.LineDown(1)
-	case "k", "up":
-		m.detail.viewport.LineUp(1)
-	case "ctrl+d", "pgdown":
-		m.detail.viewport.HalfViewDown()
-	case "ctrl+u", "pgup":
-		m.detail.viewport.HalfViewUp()
-	case "g":
-		m.detail.viewport.GotoTop()
-	case "G":
-		m.detail.viewport.GotoBottom()
-	case "a":
-		return m, m.detailTransitionCmd("activate")
-	case "p":
-		return m, m.detailTransitionCmd("park")
-	case "d":
-		return m, m.detailTransitionCmd("done")
-	case "K":
-		return m, m.detailTransitionCmd("kill")
-	case "r":
-		return m, m.detailTransitionCmd("revive")
+		m.refreshPreview()
 	}
 	return m, nil
 }
@@ -269,30 +240,6 @@ func (m *Model) transitionCmd(name string) tea.Cmd {
 		if err := runTransition(m.board, name, id); err != nil {
 			return statusMsg(err.Error())
 		}
-		v, err := m.board.Board()
-		if err != nil {
-			return statusMsg("reload: " + err.Error())
-		}
-		return reloadedMsg{view: v}
-	}
-}
-
-// detailTransitionCmd is the same idea but issued from the detail
-// view — applies to the currently-loaded card.
-func (m *Model) detailTransitionCmd(name string) tea.Cmd {
-	if m.detail.card == nil {
-		return nil
-	}
-	id := m.detail.card.ID
-	return func() tea.Msg {
-		if err := runTransition(m.board, name, id); err != nil {
-			return statusMsg(err.Error())
-		}
-		c, _, err := m.board.LoadCard(id)
-		if err != nil {
-			return statusMsg("reload: " + err.Error())
-		}
-		m.detail.card = c
 		v, err := m.board.Board()
 		if err != nil {
 			return statusMsg("reload: " + err.Error())
