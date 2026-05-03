@@ -8,12 +8,13 @@ import "github.com/charmbracelet/lipgloss"
 // detection. We pick colors that read on both light and dark
 // terminals, biased toward dark since that's the common case.
 var styles = struct {
-	header   lipgloss.Style
-	cursor   lipgloss.Style
-	priority [4]lipgloss.Style
-	dim      lipgloss.Style
-	statusBg lipgloss.Style
-	border   lipgloss.Style
+	header        lipgloss.Style
+	cursor        lipgloss.Style
+	priority      [4]lipgloss.Style
+	dim           lipgloss.Style
+	statusBg      lipgloss.Style
+	border        lipgloss.Style
+	borderFocused lipgloss.Style
 }{
 	header: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7aa2f7")),
 	cursor: lipgloss.NewStyle().Background(lipgloss.Color("#3b4261")).Foreground(lipgloss.Color("#ffffff")),
@@ -23,9 +24,10 @@ var styles = struct {
 		lipgloss.NewStyle(),
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#666")),
 	},
-	dim:      lipgloss.NewStyle().Foreground(lipgloss.Color("#888")),
-	statusBg: lipgloss.NewStyle().Foreground(lipgloss.Color("#aaa")),
-	border:   lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#444")),
+	dim:           lipgloss.NewStyle().Foreground(lipgloss.Color("#888")),
+	statusBg:      lipgloss.NewStyle().Foreground(lipgloss.Color("#aaa")),
+	border:        lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#444")),
+	borderFocused: lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#e0af68")),
 }
 
 // priorityStyle returns the lipgloss style to apply to a priority
