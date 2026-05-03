@@ -4,7 +4,7 @@ id: 2
 uuid: 019dec6b-f502-768c-8f76-5d3b5b57e82f
 title: 'Issue #1: implementation notes the design doc doesnt capture'
 type: card
-status: backlog
+status: active
 priority: p2
 project: focus
 created: 2026-05-03

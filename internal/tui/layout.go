@@ -7,36 +7,57 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// renderSplit composes nav + preview into a single screen. When the
-// terminal is at least splitWidthThreshold cols wide we place them
-// side-by-side; below that we stack nav on top of preview.
+// navNaturalWidth is the width the nav column wants when there's
+// room. It matches the formatRow output (#0001 + 40-char title +
+// project + priority + owner with separators) plus a small margin.
+const navNaturalWidth = 80
+
+// renderSplit composes nav + preview into a single screen, sizing
+// each pane to its content. Side-by-side when the terminal can fit
+// nav at its natural width plus the preview's content width;
+// otherwise stacked so the preview gets the full terminal width.
 //
-// The split point is fixed at 50% on stacked mode (nav gets the top
-// half) and at the nav's natural width on side-by-side mode (which
-// caps at half the terminal width — gives the preview room to
-// breathe on very wide terminals).
+// "Content-aware" means the preview pane's width is driven by the
+// rendered card's actual longest line, not a fixed 50/50 split. A
+// short card gets a narrow preview pane and the nav grows to fill
+// the rest; a wide card forces the layout to stack so nothing gets
+// truncated unnecessarily.
 func renderSplit(width, height int, nav *boardModel, prev *previewModel) string {
 	if width <= 0 || height <= 0 {
 		return ""
 	}
 
-	if width >= splitWidthThreshold {
-		return renderSideBySide(width, height, nav, prev)
+	const navMinWidth = 50
+	contentW := prev.contentWidth()
+	if contentW < 1 {
+		contentW = 1
 	}
+
+	if navNaturalWidth+1+contentW <= width {
+		return renderSideBySide(width, height, nav, prev, navNaturalWidth, contentW)
+	}
+
+	if navMinWidth+1+contentW <= width {
+		navW := width - 1 - contentW
+		if navW > navNaturalWidth {
+			navW = navNaturalWidth
+		}
+		return renderSideBySide(width, height, nav, prev, navW, width-navW-1)
+	}
+
 	return renderStacked(width, height, nav, prev)
 }
 
-func renderSideBySide(width, height int, nav *boardModel, prev *previewModel) string {
-	navWidth := navColumnWidth(width)
-	previewWidth := width - navWidth - 1
+func renderSideBySide(width, height int, nav *boardModel, prev *previewModel, navW, previewW int) string {
 	gutter := " "
 
-	left := nav.view(navWidth, height)
-	right := prev.view(previewWidth, height)
+	left := nav.view(navW, height)
+	right := prev.view(previewW, height)
 
-	left = padPaneLines(left, navWidth, height)
-	right = padPaneLines(right, previewWidth, height)
+	left = padPaneLines(left, navW, height)
+	right = padPaneLines(right, previewW, height)
 
+	_ = width
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, gutter, right)
 }
 
@@ -58,17 +79,6 @@ func renderStacked(width, height int, nav *boardModel, prev *previewModel) strin
 
 	separator := strings.Repeat("─", width)
 	return lipgloss.JoinVertical(lipgloss.Left, top, separator, bottom)
-}
-
-// navColumnWidth picks how wide the nav column should be in
-// side-by-side mode. We give nav 80 cols (its natural row width)
-// when the terminal is wide enough; otherwise we split 50/50.
-func navColumnWidth(termWidth int) int {
-	const natural = 80
-	if termWidth >= natural*2 {
-		return natural
-	}
-	return termWidth / 2
 }
 
 // padPaneLines pads each line of s to width and pads the line count

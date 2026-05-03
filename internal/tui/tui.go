@@ -55,12 +55,6 @@ const (
 	modeCommand
 )
 
-// splitWidthThreshold is the minimum terminal width at which we
-// place nav + preview side-by-side. Below this the layout stacks
-// nav on top of preview. The nav row is ~80 chars wide, so we want
-// at least ~40 cols of preview alongside it — 120 total.
-const splitWidthThreshold = 120
-
 // Model is the root Bubble Tea model. Holds the resolved board, the
 // current view + input modes, and references to each sub-model.
 type Model struct {

@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestPadLine(t *testing.T) {
@@ -47,26 +49,45 @@ func TestRenderSplitWideUsesHorizontal(t *testing.T) {
 	updated, _ := m.Update(reloadedMsg{view: v})
 	m = updated.(*Model)
 
-	out := renderSplit(splitWidthThreshold+10, 20, &m.board_, &m.preview)
-	// Side-by-side: the first line should contain the nav header
-	// AND the preview header (#0001 title) joined horizontally.
+	out := renderSplit(200, 20, &m.board_, &m.preview)
 	firstLine := strings.SplitN(out, "\n", 2)[0]
 	if !strings.Contains(firstLine, "ACTIVE") || !strings.Contains(firstLine, "#0001") {
 		t.Errorf("wide layout didn't side-by-side; first line = %q", firstLine)
 	}
 }
 
-func TestRenderSplitNarrowStacks(t *testing.T) {
+func TestRenderSplitTooNarrowStacks(t *testing.T) {
 	b := setupBoard(t)
 	m, _ := newModel(b)
 	v, _ := b.Board()
 	updated, _ := m.Update(reloadedMsg{view: v})
 	m = updated.(*Model)
 
-	out := renderSplit(splitWidthThreshold-30, 20, &m.board_, &m.preview)
-	// Stacked: the separator row of ─ runs should appear between
-	// nav and preview.
-	if !strings.Contains(out, strings.Repeat("─", splitWidthThreshold-30)) {
+	const termWidth = 50
+	out := renderSplit(termWidth, 20, &m.board_, &m.preview)
+	if !strings.Contains(out, strings.Repeat("─", termWidth)) {
 		t.Errorf("narrow layout didn't draw separator: %q", out)
+	}
+}
+
+func TestRenderSplitSizesPreviewToContent(t *testing.T) {
+	b := setupBoard(t)
+	m, _ := newModel(b)
+	v, _ := b.Board()
+	updated, _ := m.Update(reloadedMsg{view: v})
+	m = updated.(*Model)
+
+	contentW := m.preview.contentWidth()
+	if contentW <= 0 {
+		t.Fatal("preview reported zero content width")
+	}
+	const slack = 50
+	out := renderSplit(navNaturalWidth+1+contentW+slack, 20, &m.board_, &m.preview)
+	firstLine := strings.SplitN(out, "\n", 2)[0]
+	totalUsed := ansi.StringWidth(firstLine)
+	wantApprox := navNaturalWidth + 1 + contentW
+	if totalUsed > wantApprox+5 {
+		t.Errorf("preview pane wider than content: total=%d, want ~%d (content=%d, nav=%d)",
+			totalUsed, wantApprox, contentW, navNaturalWidth)
 	}
 }

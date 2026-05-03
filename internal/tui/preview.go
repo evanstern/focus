@@ -8,6 +8,7 @@ import (
 	"github.com/evanstern/focus/internal/board/card"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // previewModel renders a single card's frontmatter header + body
@@ -126,6 +127,62 @@ func (m *previewModel) invalidate(id int) {
 			delete(m.rendered, k)
 		}
 	}
+}
+
+// contentWidth returns the widest visible-column count across all
+// header + body lines for the currently-loaded card. Used by the
+// layout to size the preview pane to the content's natural width.
+//
+// Returns 0 when no card is loaded. ANSI-aware via ansi.StringWidth.
+func (m *previewModel) contentWidth() int {
+	if m.card == nil {
+		return 0
+	}
+	rendered := m.viewWithoutClip()
+	max := 0
+	for _, line := range strings.Split(rendered, "\n") {
+		w := ansi.StringWidth(line)
+		if w > max {
+			max = w
+		}
+	}
+	return max
+}
+
+// viewWithoutClip is the unclipped, unbounded version of view().
+// Same content as a normal preview render, but skips clipToHeight so
+// contentWidth can measure every line, not just what would fit on
+// screen.
+func (m *previewModel) viewWithoutClip() string {
+	if m.card == nil {
+		return ""
+	}
+	c := m.card
+	var b strings.Builder
+	fmt.Fprintf(&b, "#%s  %s\n", card.PaddedID(c.ID), c.Title)
+	fmt.Fprintf(&b, "  status: %s   priority: %s\n", c.Status, c.Priority)
+	fmt.Fprintf(&b, "  project: %s   type: %s\n", c.Project, c.Type)
+	if c.Epic != nil {
+		fmt.Fprintf(&b, "  epic: #%04d\n", *c.Epic)
+	}
+	if !c.Created.IsZero() {
+		fmt.Fprintf(&b, "  created: %s\n", c.Created.Format("2006-01-02"))
+	}
+	if c.Owner != "" {
+		fmt.Fprintf(&b, "  owner: %s\n", c.Owner)
+	}
+	if len(c.Tags) > 0 {
+		fmt.Fprintf(&b, "  tags: %s\n", strings.Join(c.Tags, ", "))
+	}
+	if len(c.Contract) > 0 {
+		fmt.Fprintln(&b, "  contract:")
+		for _, item := range c.Contract {
+			fmt.Fprintf(&b, "    - %s\n", item)
+		}
+	}
+	b.WriteString("\n")
+	b.WriteString(m.renderBody())
+	return b.String()
 }
 
 // clipToHeight returns at most n lines of s. Used to keep the
