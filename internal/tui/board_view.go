@@ -9,6 +9,7 @@ import (
 	"github.com/evanstern/focus/internal/board/index"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // boardModel is the default view: a flat list of cards (active
@@ -174,7 +175,9 @@ func (m *boardModel) selectedCard() *index.Entry {
 
 // view renders the board into a string. height bounds the visible
 // rows; if the cursor is offscreen we scroll the window to keep it
-// in view.
+// in view. width controls how the per-card row is laid out: the
+// title column gets whatever's left after fixed columns, with ellipsis
+// truncation if the title overflows.
 func (m *boardModel) view(width, height int) string {
 	if len(m.rows) == 0 {
 		return "(loading...)\n"
@@ -182,26 +185,140 @@ func (m *boardModel) view(width, height int) string {
 	if height <= 0 {
 		height = 20
 	}
+	if width < 20 {
+		width = 20
+	}
 
 	start, end := m.scrollWindow(height)
+	cols := computeColumnWidths(width)
+
 	var b strings.Builder
 	for i := start; i < end; i++ {
 		r := m.rows[i]
+
+		if i > start && r.header != "" {
+			b.WriteString("\n")
+		}
+
 		if r.header != "" {
-			b.WriteString(r.header)
+			b.WriteString(styles.header.Render(r.header))
 			b.WriteString("\n")
 			continue
 		}
-		prefix := "  "
+
+		line := formatCardRow(*r.entry, cols)
 		if i == m.cursor {
-			prefix = "> "
+			line = styles.cursor.Width(width).Render(line)
 		}
-		b.WriteString(prefix)
-		b.WriteString(formatCardRow(*r.entry))
+		b.WriteString(line)
 		b.WriteString("\n")
 	}
-	_ = width
 	return b.String()
+}
+
+// columnWidths describes the width budget allocated to each column
+// of a card row. Computed once per view from the available nav width.
+//
+// Fixed columns (id, project, priority) get fixed budgets. Title gets
+// whatever's left. Owner is shown only when the row has at least
+// minOwnerWidth columns of slack after the title; otherwise it's
+// dropped. This makes the nav responsive: at 80 cols you see all
+// columns; at 60 cols owner disappears; at 40 cols title gets very
+// short with an ellipsis but the row stays readable.
+type columnWidths struct {
+	idW       int
+	titleW    int
+	projectW  int
+	priorityW int
+	ownerW    int
+	gap       int
+}
+
+func computeColumnWidths(width int) columnWidths {
+	const (
+		idW       = 5
+		projectW  = 10
+		priorityW = 4
+		minOwner  = 6
+		minTitle  = 10
+		gap       = 2
+	)
+	c := columnWidths{idW: idW, projectW: projectW, priorityW: priorityW, gap: gap}
+
+	fixed := idW + gap + projectW + gap + priorityW
+
+	if width >= fixed+gap+minOwner+gap+minTitle {
+		c.ownerW = minOwner
+		c.titleW = width - fixed - gap*2 - c.ownerW
+		return c
+	}
+
+	if width >= fixed+gap+minTitle {
+		c.titleW = width - fixed - gap
+		return c
+	}
+
+	c.titleW = width - idW - gap
+	if c.titleW < 1 {
+		c.titleW = 1
+	}
+	c.projectW = 0
+	c.priorityW = 0
+	return c
+}
+
+// formatCardRow renders one card to the column budget in cols. ANSI
+// styling for priority is applied last so column-width math (which
+// uses ansi.StringWidth) stays correct.
+func formatCardRow(e index.Entry, cols columnWidths) string {
+	id := "#" + card.PaddedID(e.ID)
+	id = padOrTrunc(id, cols.idW)
+
+	title := padOrTrunc(e.Title, cols.titleW)
+
+	var b strings.Builder
+	b.WriteString(id)
+	b.WriteString(strings.Repeat(" ", cols.gap))
+	b.WriteString(title)
+
+	if cols.projectW > 0 {
+		b.WriteString(strings.Repeat(" ", cols.gap))
+		b.WriteString(padOrTrunc(e.Project, cols.projectW))
+	}
+	if cols.priorityW > 0 {
+		b.WriteString(strings.Repeat(" ", cols.gap))
+		prio := padOrTrunc(string(e.Priority), cols.priorityW)
+		b.WriteString(priorityStyle(string(e.Priority)).Render(prio))
+	}
+	if cols.ownerW > 0 {
+		owner := e.Owner
+		if owner == "" {
+			owner = "-"
+		}
+		b.WriteString(strings.Repeat(" ", cols.gap))
+		b.WriteString(padOrTrunc(owner, cols.ownerW))
+	}
+
+	return b.String()
+}
+
+// padOrTrunc pads s with spaces on the right or truncates with an
+// ellipsis to exactly width terminal columns. ANSI-aware.
+func padOrTrunc(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	w := ansi.StringWidth(s)
+	if w == width {
+		return s
+	}
+	if w < width {
+		return s + strings.Repeat(" ", width-w)
+	}
+	if width <= 1 {
+		return ansi.Truncate(s, width, "")
+	}
+	return ansi.Truncate(s, width, "…")
 }
 
 // scrollWindow returns the slice [start, end) of m.rows to render
@@ -223,18 +340,6 @@ func (m *boardModel) scrollWindow(height int) (int, int) {
 		}
 	}
 	return start, end
-}
-
-// formatCardRow is the per-card line format. Mirrors the CLI's
-// formatRow so users see a consistent layout across surfaces.
-func formatCardRow(e index.Entry) string {
-	owner := e.Owner
-	if owner == "" {
-		owner = "-"
-	}
-	return fmt.Sprintf("#%s  %-40s  %-10s  %-4s  %s",
-		card.PaddedID(e.ID), e.Title, e.Project, string(e.Priority), owner,
-	)
 }
 
 // reloadedMsg carries fresh board data and the filter mode it was
