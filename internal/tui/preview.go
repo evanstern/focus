@@ -18,15 +18,14 @@ type previewModel struct {
 	board *board.Board
 	card  *card.Card
 
-	// rendered caches the glamour-rendered body keyed by (cardID,
-	// width). Width is part of the key because resizing the terminal
-	// invalidates the wrapped output.
+	// rendered caches the glamour-rendered body keyed by card id.
+	// Width is no longer in the key because we don't soft-wrap; the
+	// rendered output is the same regardless of how wide the pane is.
 	rendered map[previewKey]string
 }
 
 type previewKey struct {
-	id    int
-	width int
+	id int
 }
 
 func newPreviewModel(b *board.Board) previewModel {
@@ -79,30 +78,34 @@ func (m *previewModel) view(width, height int) string {
 		}
 	}
 	b.WriteString("\n")
-	b.WriteString(m.renderBody(width))
+	b.WriteString(m.renderBody())
 
 	return clipToHeight(b.String(), height)
 }
 
-// renderBody is the glamour render with the width gotcha applied
-// (designs/focus-issue-001.md §"Glamour width gotcha"). We subtract
-// a small budget for glamour's internal padding so wrapped lines
-// don't blow past the pane width.
-func (m *previewModel) renderBody(width int) string {
+// renderBody styles the card body with glamour but disables soft
+// wrap so users see the content exactly as written. Long lines get
+// clipped at the pane edge by padPaneLines (using ansi.Truncate).
+//
+// WithPreservedNewLines is required because glamour's CommonMark
+// pass collapses author-inserted line breaks otherwise — paragraphs
+// become single long lines, which is the opposite of what we want
+// when the on-disk file has hand-formatted line lengths.
+//
+// The cache is keyed only by card id (not width) since output no
+// longer depends on width.
+func (m *previewModel) renderBody() string {
 	if m.card == nil {
 		return ""
 	}
-	w := width - 4
-	if w < 20 {
-		w = 20
-	}
-	key := previewKey{id: m.card.ID, width: w}
+	key := previewKey{id: m.card.ID}
 	if cached, ok := m.rendered[key]; ok {
 		return cached
 	}
 	r, err := glamour.NewTermRenderer(
 		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(w),
+		glamour.WithWordWrap(0),
+		glamour.WithPreservedNewLines(),
 	)
 	if err != nil {
 		return m.card.Body
