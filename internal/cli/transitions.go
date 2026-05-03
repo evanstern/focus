@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 
@@ -106,12 +105,22 @@ func runDone(args []string, stdout, stderr io.Writer) int {
 		for _, item := range c.Contract {
 			fmt.Fprintf(stdout, "  - %s\n", item)
 		}
-		if !isTTY(os.Stdin) {
-			fmt.Fprintln(stderr, "focus: contract has items; rerun with --force in non-interactive contexts")
+
+		// Prefer /dev/tty over os.Stdin so a redirected stdin
+		// (CI scripts, wrapper pipes) doesn't block the prompt
+		// when the user has a real controlling terminal. This
+		// mirrors what git/ssh/sudo do.
+		ttyIn, ttyOut, ok := openControllingTTY()
+		if !ok {
+			fmt.Fprintln(stderr, "focus: contract has items and no controlling tty; rerun with --force")
 			return 1
 		}
-		fmt.Fprint(stdout, "confirm done? [y/N]: ")
-		reader := bufio.NewReader(os.Stdin)
+		defer ttyIn.Close()
+		if ttyOut != ttyIn {
+			defer ttyOut.Close()
+		}
+		fmt.Fprint(ttyOut, "confirm done? [y/N]: ")
+		reader := bufio.NewReader(ttyIn)
 		line, _ := reader.ReadString('\n')
 		ans := strings.ToLower(strings.TrimSpace(line))
 		if ans != "y" && ans != "yes" {

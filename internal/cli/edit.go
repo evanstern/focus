@@ -74,3 +74,23 @@ func isTTY(f *os.File) bool {
 	}
 	return (info.Mode() & os.ModeCharDevice) != 0
 }
+
+// openControllingTTY opens /dev/tty for read+write so an interactive
+// prompt works even when stdin or stdout is redirected. Returns
+// (in, out, true) on success; (nil, nil, false) when no controlling
+// terminal is available (CI runners, pipes-only environments).
+//
+// On Unix, /dev/tty is the per-process controlling terminal regardless
+// of fd0/1/2 redirection — that's the whole reason it exists. Falls
+// back to (stdin, stdout, true) only when both are TTYs, so platforms
+// without /dev/tty still get a working prompt.
+func openControllingTTY() (in *os.File, out *os.File, ok bool) {
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err == nil {
+		return tty, tty, true
+	}
+	if isTTY(os.Stdin) && isTTY(os.Stdout) {
+		return os.Stdin, os.Stdout, true
+	}
+	return nil, nil, false
+}
