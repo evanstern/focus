@@ -197,6 +197,72 @@ func TestFilterCycleWorksRegardlessOfFocus(t *testing.T) {
 	}
 }
 
+func TestSameIdReloadRefreshesViewportContent(t *testing.T) {
+	b := setupBoardForFocus(t)
+	m := bootstrap(t, b)
+
+	first := m.board_.selectedCard()
+	if first == nil {
+		t.Fatal("no card selected")
+	}
+	id := first.ID
+
+	if err := m.preview.load(id); err != nil {
+		t.Fatal(err)
+	}
+	_ = m.View()
+	beforeContent := m.preview.viewport.View()
+	if !strings.Contains(beforeContent, "backlog") {
+		t.Fatalf("preview content missing 'backlog' status: %q", beforeContent)
+	}
+
+	if _, err := b.Activate(id, false); err != nil {
+		t.Fatalf("activate: %v", err)
+	}
+
+	if err := m.preview.load(id); err != nil {
+		t.Fatal(err)
+	}
+	_ = m.View()
+	afterContent := m.preview.viewport.View()
+	if !strings.Contains(afterContent, "active") {
+		t.Errorf("after activate, viewport content missing 'active' status (stale render): %q",
+			afterContent)
+	}
+}
+
+func TestSameIdReloadPreservesYOffset(t *testing.T) {
+	b := setupBoardForFocus(t)
+	m := bootstrap(t, b)
+
+	first := m.board_.selectedCard()
+	if first == nil {
+		t.Fatal("no card selected")
+	}
+	id := first.ID
+
+	updated, _ := m.Update(key("tab"))
+	m = updated.(*Model)
+	for i := 0; i < 4; i++ {
+		updated, _ = m.Update(key("j"))
+		m = updated.(*Model)
+	}
+	beforeOffset := m.preview.viewport.YOffset
+	if beforeOffset == 0 {
+		t.Fatal("setup: expected non-zero YOffset before same-id reload")
+	}
+
+	if err := m.preview.load(id); err != nil {
+		t.Fatal(err)
+	}
+	_ = m.View()
+
+	if m.preview.viewport.YOffset != beforeOffset {
+		t.Errorf("same-id reload changed YOffset: was %d, now %d",
+			beforeOffset, m.preview.viewport.YOffset)
+	}
+}
+
 func TestNavFocusedJStillMovesCursor(t *testing.T) {
 	b := setupBoardForFocus(t)
 	m := bootstrap(t, b)

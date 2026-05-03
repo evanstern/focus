@@ -31,11 +31,15 @@ func newCommandState() commandState { return commandState{} }
 func (c *commandState) reset() { c.input = "" }
 
 // handleBoardKey handles normal-mode keys for the split board.
-// Movement keys (j/k/gg/G/ctrl+d/u/f/b) route to whichever pane has
-// focus: nav when m.focused == focusNav (cursor moves and preview
-// reloads), preview when m.focused == focusPreview (viewport scrolls).
-// Filter cycle, transitions, search, command-mode, edit and quit work
-// regardless of focused pane.
+// Movement keys route by focused pane:
+//   - j/k/gg/G/ctrl+d/ctrl+u: both panes — move the nav cursor (and
+//     reload the preview) when nav is focused, scroll the preview
+//     viewport when preview is focused.
+//   - ctrl+f/ctrl+b: preview only — full-page scroll. They have no
+//     binding when nav is focused; nav uses ctrl+d/ctrl+u for paging.
+//
+// Filter cycle, transitions, search, command-mode, edit and quit
+// work regardless of focused pane.
 func (m *Model) handleBoardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 

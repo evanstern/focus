@@ -54,9 +54,17 @@ func newPreviewModel(b *board.Board) previewModel {
 // board package reads from the disk file each time, but we cache the
 // glamour render which is the expensive bit.
 //
+// Forces the viewport to be re-populated on next view(): frontmatter
+// fields (status, priority, tags, ...) may have changed even when the
+// id is the same (e.g. after a transition like activate/done), and
+// the cached viewport content would otherwise stay stale until a
+// resize.
+//
 // Resets the viewport scroll position to top whenever the loaded
 // card's id changes — by design, we don't preserve per-card scroll
-// across cursor moves.
+// across cursor moves. Same-id reloads keep their YOffset so a
+// transition doesn't yank the user away from where they were
+// reading.
 func (m *previewModel) load(id int) error {
 	c, _, err := m.board.LoadCard(id)
 	if err != nil {
@@ -67,10 +75,10 @@ func (m *previewModel) load(id int) error {
 		prevID = m.card.ID
 	}
 	m.card = c
+	m.lastWidth = 0
+	m.lastHeight = 0
 	if prevID != c.ID {
 		m.viewport.SetYOffset(0)
-		m.lastWidth = 0
-		m.lastHeight = 0
 	}
 	return nil
 }
