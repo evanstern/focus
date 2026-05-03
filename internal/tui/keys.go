@@ -93,9 +93,12 @@ func (m *Model) handleBoardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "N":
 		m.advanceSearchMatch(-1)
 		m.refreshPreview()
-	case "tab":
+	case "tab", "l":
 		next := m.board_.filter.next()
 		return m, reloadCmd(m.board, next)
+	case "shift+tab", "h":
+		prev := m.board_.filter.prev()
+		return m, reloadCmd(m.board, prev)
 	case "s":
 		m.split = m.split.next()
 		m.status = "layout: " + m.split.label()
@@ -156,11 +159,14 @@ func (m *Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// isPrintable reports whether a key event is a single printable rune
+// isPrintable reports whether a key event is a printable character
 // we should append to a search/command buffer. Bubble Tea reports
-// special keys ("enter", "ctrl+x") as multi-rune strings; we filter
-// those out by length.
+// most printable characters as KeyRunes but space gets its own
+// dedicated KeySpace type, which we accept too.
 func isPrintable(msg tea.KeyMsg) bool {
+	if msg.Type == tea.KeySpace {
+		return true
+	}
 	if msg.Type != tea.KeyRunes {
 		return false
 	}

@@ -49,6 +49,10 @@ func (f filterMode) next() filterMode {
 	return (f + 1) % 4
 }
 
+func (f filterMode) prev() filterMode {
+	return (f + 3) % 4
+}
+
 type boardModel struct {
 	rows     []row
 	cursor   int
