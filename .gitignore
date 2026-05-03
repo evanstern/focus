@@ -1,0 +1,20 @@
+# derived caches & lock files
+*.lock
+.focus/index.json
+.focus/.lock
+
+# build artifacts
+dist/
+/focus
+
+
+# OS detritus
+.DS_Store
+Thumbs.db
+
+# editor
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
