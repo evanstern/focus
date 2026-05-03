@@ -278,6 +278,28 @@ func (b *Board) Revive(id int, force bool) (*card.Card, error) {
 	}, force)
 }
 
+// SetBody replaces a card's markdown body, leaving frontmatter
+// untouched. Used by the MCP focus_edit_body tool — the CLI doesn't
+// expose this directly because `focus edit` opens $EDITOR for
+// interactive editing.
+func (b *Board) SetBody(id int, body string) error {
+	return lock.With(b.Dir, func() error {
+		c, dirName, err := b.LoadCard(id)
+		if err != nil {
+			return err
+		}
+		c.Body = body
+		idx, err := index.LoadOrEmpty(b.Dir)
+		if err != nil {
+			return err
+		}
+		if err := b.saveCardLocked(c, dirName, idx); err != nil {
+			return err
+		}
+		return index.Save(b.Dir, idx)
+	})
+}
+
 // EpicAdd sets the epic field on a card to point at the given epic
 // id. Validates that epicID names an existing card with type:epic
 // unless force is true.
