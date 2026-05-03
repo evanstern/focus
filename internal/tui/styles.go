@@ -2,12 +2,11 @@ package tui
 
 import "github.com/charmbracelet/lipgloss"
 
-// styleSet is the package-wide palette. Defined once so colors and
-// adaptive styling stay consistent across nav, preview, status bar.
-//
-// Adaptive colors mean the same logical role (e.g. "section header")
-// renders differently on light vs dark terminals. Lipgloss handles
-// the detection.
+// styleSet is the package-wide palette. Fixed colors (not Adaptive)
+// because lipgloss's HasDarkBackground query is unreliable in
+// tmux/screen — the same query that breaks termenv's profile
+// detection. We pick colors that read on both light and dark
+// terminals, biased toward dark since that's the common case.
 var styles = struct {
 	header   lipgloss.Style
 	cursor   lipgloss.Style
@@ -15,16 +14,16 @@ var styles = struct {
 	dim      lipgloss.Style
 	statusBg lipgloss.Style
 }{
-	header: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#444", Dark: "#bbb"}),
-	cursor: lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "#cde", Dark: "#235"}).Foreground(lipgloss.AdaptiveColor{Light: "#000", Dark: "#fff"}),
+	header: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7aa2f7")),
+	cursor: lipgloss.NewStyle().Background(lipgloss.Color("#3b4261")).Foreground(lipgloss.Color("#ffffff")),
 	priority: [4]lipgloss.Style{
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#e06060")).Bold(true),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#e0c060")),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#f7768e")).Bold(true),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#e0af68")),
 		lipgloss.NewStyle(),
-		lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#888", Dark: "#666"}),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#666")),
 	},
-	dim:      lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#888", Dark: "#666"}),
-	statusBg: lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#666", Dark: "#aaa"}),
+	dim:      lipgloss.NewStyle().Foreground(lipgloss.Color("#888")),
+	statusBg: lipgloss.NewStyle().Foreground(lipgloss.Color("#aaa")),
 }
 
 // priorityStyle returns the lipgloss style to apply to a priority

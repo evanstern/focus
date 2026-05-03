@@ -16,16 +16,26 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/evanstern/focus/internal/board"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 // Run boots the TUI program against the given board and runs until
 // the user quits. Caller is responsible for board resolution; this
 // matches the CLI handler shape (open the board, hand it to the TUI).
+//
+// We pin the lipgloss default renderer's color profile based on
+// TERM/COLORTERM. termenv's auto-detection sometimes returns Ascii
+// in tmux/screen contexts where colors actually work fine; the pin
+// makes the TUI's colors deterministic.
 func Run(b *board.Board) error {
+	lipgloss.SetColorProfile(detectProfile())
+
 	m, err := newModel(b)
 	if err != nil {
 		return err
@@ -33,6 +43,33 @@ func Run(b *board.Board) error {
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err = p.Run()
 	return err
+}
+
+// detectProfile picks a sensible color profile from environment
+// variables. termenv's own ColorProfile() is gated on isTTY(stdout)
+// which can return false when bubbletea is initializing the program
+// before our renderer takes over. We replicate the env-only pieces
+// of termenv's detection here so we always get color in the common
+// terminals.
+func detectProfile() termenv.Profile {
+	switch os.Getenv("COLORTERM") {
+	case "24bit", "truecolor":
+		return termenv.TrueColor
+	case "yes", "true":
+		return termenv.ANSI256
+	}
+	term := os.Getenv("TERM")
+	switch term {
+	case "alacritty", "wezterm", "xterm-kitty", "xterm-ghostty", "rio", "contour":
+		return termenv.TrueColor
+	}
+	if strings.Contains(term, "256color") {
+		return termenv.ANSI256
+	}
+	if strings.Contains(term, "color") || strings.Contains(term, "ansi") {
+		return termenv.ANSI
+	}
+	return termenv.ANSI256
 }
 
 // viewMode is the top-level state enum. Two modes only: the split
