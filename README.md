@@ -48,8 +48,9 @@ Download from [GitHub Releases](https://github.com/evanstern/focus/releases).
 linux/amd64, linux/arm64, darwin/amd64, darwin/arm64.
 
 ```bash
-# example for linux/amd64
-curl -L https://github.com/evanstern/focus/releases/latest/download/focus-linux-amd64.tar.gz \
+# example for linux/amd64; replace VERSION with the tag you want
+VERSION=v0.1.0
+curl -L "https://github.com/evanstern/focus/releases/download/${VERSION}/focus-${VERSION#v}-linux-amd64.tar.gz" \
   | tar xz
 sudo mv focus /usr/local/bin/
 ```
