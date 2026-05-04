@@ -75,6 +75,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runMCP(rest, stdout, stderr)
 	case "tui":
 		return runTUI(rest, stdout, stderr)
+	case "completions":
+		return runCompletions(rest, stdout, stderr)
+	case "_complete":
+		return runComplete(rest, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "focus: unknown command %q. try `focus help`.\n", cmd)
 		return 2
@@ -141,6 +145,9 @@ TUI
 
 MCP
   mcp serve                JSON-RPC over stdio for MCP clients.
+
+SHELL COMPLETIONS
+  completions <shell>      Print bash|zsh|fish completion script.
 
 META
   version                  Print version
