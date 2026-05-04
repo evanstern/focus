@@ -40,17 +40,33 @@ _focus() {
             ;;
         args)
             case $line[1] in
-                show|edit|kill)
+                show|edit)
                     _focus_ids
                     ;;
-                activate)
-                    _focus_ids --status backlog
+                kill)
+                    _arguments \
+                        '--force[skip checks]' \
+                        '*::card id:_focus_ids'
                     ;;
-                park|done)
-                    _focus_ids --status active
+                activate)
+                    _arguments \
+                        '--force[bypass WIP limit]' \
+                        '*::card id:_focus_ids --status backlog'
+                    ;;
+                park)
+                    _arguments \
+                        '--force[skip from-status check]' \
+                        '*::card id:_focus_ids --status active'
+                    ;;
+                done)
+                    _arguments \
+                        '--force[skip the contract prompt]' \
+                        '*::card id:_focus_ids --status active'
                     ;;
                 revive)
-                    _focus_ids --status archived
+                    _arguments \
+                        '--force[skip from-status check]' \
+                        '*::card id:_focus_ids --status archived'
                     ;;
                 list)
                     _arguments \

@@ -73,3 +73,10 @@ complete -c focus -n '__focus_using list' -l project  -x
 complete -c focus -n '__focus_using list' -l epic     -x
 complete -c focus -n '__focus_using list' -l owner    -x
 complete -c focus -n '__focus_using list' -l tag      -x
+
+complete -c focus -n '__focus_using activate' -l force -d 'bypass WIP limit'
+complete -c focus -n '__focus_using park'     -l force -d 'skip from-status check'
+complete -c focus -n '__focus_using done'     -l force -d 'skip the contract prompt'
+complete -c focus -n '__focus_using kill'     -l force -d 'skip checks'
+complete -c focus -n '__focus_using revive'   -l force -d 'skip from-status check'
+complete -c focus -n '__focus_using epic'     -l force -d 'skip epic-id existence check'

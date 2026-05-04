@@ -12,7 +12,7 @@ import (
 )
 
 func runCompletions(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
+	if len(args) != 1 {
 		fmt.Fprintln(stderr, "usage: focus completions <bash|zsh|fish>")
 		return 2
 	}

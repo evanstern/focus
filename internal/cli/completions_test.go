@@ -37,6 +37,14 @@ func TestCompletionsMissingArg(t *testing.T) {
 	}
 }
 
+func TestCompletionsExtraArgs(t *testing.T) {
+	dir := t.TempDir()
+	code, _, _ := runIn(t, dir, "completions", "bash", "extra")
+	if code != 2 {
+		t.Errorf("exit = %d, want 2 (extra args should be rejected)", code)
+	}
+}
+
 func TestCompletePriorities(t *testing.T) {
 	dir := t.TempDir()
 	code, out, _ := runIn(t, dir, "_complete", "priorities")

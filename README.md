@@ -61,9 +61,8 @@ sudo mv focus /usr/local/bin/
 
 `focus completions <shell>` prints a completion script to stdout.
 Subcommands, card ids, statuses, priorities, and types complete on
-`<TAB>`. Card-id completions are filtered by command — `focus done
-<TAB>` only offers active cards, `focus revive <TAB>` only archived
-ones.
+`<TAB>`. Card-id completions are filtered by command: `focus done <TAB>`
+only offers active cards, `focus revive <TAB>` only archived ones.
 
 ```bash
 # bash — add to ~/.bashrc

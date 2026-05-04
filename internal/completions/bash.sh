@@ -36,17 +36,27 @@ _focus() {
             COMPREPLY=( $(compgen -W "$(focus _complete types 2>/dev/null)" -- "$cur") )
             return 0
             ;;
-        --status)
-            COMPREPLY=( $(compgen -W "$(focus _complete statuses 2>/dev/null)" -- "$cur") )
-            return 0
-            ;;
         --project|--epic|--owner|--tag|--slug)
             return 0
             ;;
     esac
 
     if [[ "$cur" == --* ]]; then
-        local flags="--project --priority --epic --type --slug --owner --tag --status --force --clear"
+        local flags=""
+        case "$sub" in
+            new)
+                flags="--project --priority --epic --type --slug"
+                ;;
+            list)
+                flags="--project --priority --epic --owner --tag --type"
+                ;;
+            activate|done)
+                flags="--force"
+                ;;
+            epic)
+                flags="--force"
+                ;;
+        esac
         COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
         return 0
     fi
