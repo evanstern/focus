@@ -8,7 +8,7 @@ import (
 	"github.com/evanstern/focus/internal/board/card"
 	"github.com/evanstern/focus/internal/board/index"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 

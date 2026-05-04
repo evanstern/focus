@@ -1,6 +1,6 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 // styleSet is the package-wide palette. Fixed colors (not Adaptive)
 // because lipgloss's HasDarkBackground query is unreliable in

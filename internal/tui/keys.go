@@ -8,45 +8,205 @@ import (
 	"github.com/evanstern/focus/internal/board"
 	"github.com/evanstern/focus/internal/board/card"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
 )
 
-// searchState owns the input buffer for / mode and the matched ids.
-// We don't use bubbles/textinput; the model is small enough that a
-// plain string + a few key handlers is more direct than wiring up
-// a sub-model.
-type searchState struct {
-	query string
+// KeyMap collects every keystroke the TUI responds to. The router
+// dispatches via key.Matches against this struct rather than
+// switching on raw key strings, and bubbles/help renders the help
+// view from the same struct so the two can never drift.
+type KeyMap struct {
+	// Pane focus
+	FocusNext, FocusPrev key.Binding
+
+	// Nav movement (also re-used for preview when preview is focused)
+	Up, Down, Top, Bottom key.Binding
+	JumpDown, JumpUp      key.Binding
+
+	// Preview-only scroll (full-page)
+	ScrollPgDown, ScrollPgUp key.Binding
+
+	// Filter cycle
+	FilterNext, FilterPrev key.Binding
+
+	// Layout cycle
+	LayoutCycle key.Binding
+
+	// Actions
+	Edit, Activate, Park, Done, Kill, Revive key.Binding
+
+	// Modes
+	Search, Command, Help, Quit key.Binding
 }
 
-func newSearchState() searchState { return searchState{} }
+// DefaultKeyMap returns the canonical keybinding set, matching the
+// contract in wiki/decisions/focus-tui-keybinds.md.
+func DefaultKeyMap() KeyMap {
+	return KeyMap{
+		FocusNext: key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("tab", "focus next pane"),
+		),
+		FocusPrev: key.NewBinding(
+			key.WithKeys("shift+tab"),
+			key.WithHelp("shift+tab", "focus prev pane"),
+		),
+		Up: key.NewBinding(
+			key.WithKeys("k", "up"),
+			key.WithHelp("k/↑", "up"),
+		),
+		Down: key.NewBinding(
+			key.WithKeys("j", "down"),
+			key.WithHelp("j/↓", "down"),
+		),
+		Top: key.NewBinding(
+			key.WithKeys("g"),
+			key.WithHelp("gg", "top"),
+		),
+		Bottom: key.NewBinding(
+			key.WithKeys("G"),
+			key.WithHelp("G", "bottom"),
+		),
+		JumpDown: key.NewBinding(
+			key.WithKeys("ctrl+d", "pgdown"),
+			key.WithHelp("ctrl+d", "jump down"),
+		),
+		JumpUp: key.NewBinding(
+			key.WithKeys("ctrl+u", "pgup"),
+			key.WithHelp("ctrl+u", "jump up"),
+		),
+		ScrollPgDown: key.NewBinding(
+			key.WithKeys("ctrl+f"),
+			key.WithHelp("ctrl+f", "page down (preview)"),
+		),
+		ScrollPgUp: key.NewBinding(
+			key.WithKeys("ctrl+b"),
+			key.WithHelp("ctrl+b", "page up (preview)"),
+		),
+		FilterNext: key.NewBinding(
+			key.WithKeys("l"),
+			key.WithHelp("l", "next filter"),
+		),
+		FilterPrev: key.NewBinding(
+			key.WithKeys("h"),
+			key.WithHelp("h", "prev filter"),
+		),
+		LayoutCycle: key.NewBinding(
+			key.WithKeys("s"),
+			key.WithHelp("s", "cycle layout"),
+		),
+		Edit: key.NewBinding(
+			key.WithKeys("enter", "e", "o"),
+			key.WithHelp("enter/e/o", "edit in $EDITOR"),
+		),
+		Activate: key.NewBinding(
+			key.WithKeys("a"),
+			key.WithHelp("a", "activate"),
+		),
+		Park: key.NewBinding(
+			key.WithKeys("p"),
+			key.WithHelp("p", "park"),
+		),
+		Done: key.NewBinding(
+			key.WithKeys("d"),
+			key.WithHelp("d", "done"),
+		),
+		Kill: key.NewBinding(
+			key.WithKeys("K"),
+			key.WithHelp("K", "kill (archive)"),
+		),
+		Revive: key.NewBinding(
+			key.WithKeys("r"),
+			key.WithHelp("r", "revive"),
+		),
+		Search: key.NewBinding(
+			key.WithKeys("/"),
+			key.WithHelp("/", "search"),
+		),
+		Command: key.NewBinding(
+			key.WithKeys(":"),
+			key.WithHelp(":", "command-mode"),
+		),
+		Help: key.NewBinding(
+			key.WithKeys("?"),
+			key.WithHelp("?", "toggle help"),
+		),
+		Quit: key.NewBinding(
+			key.WithKeys("q", "ctrl+c"),
+			key.WithHelp("q", "quit"),
+		),
+	}
+}
+
+// ShortHelp / FullHelp implement help.KeyMap so bubbles/help renders
+// the keybind table directly from the KeyMap struct above.
+func (k KeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{
+		k.FocusNext, k.Up, k.Down, k.Edit, k.FilterNext, k.Search, k.Command, k.Help, k.Quit,
+	}
+}
+
+func (k KeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.FocusNext, k.FocusPrev},
+		{k.Up, k.Down, k.Top, k.Bottom, k.JumpDown, k.JumpUp, k.ScrollPgDown, k.ScrollPgUp},
+		{k.Edit, k.Activate, k.Park, k.Done, k.Kill, k.Revive},
+		{k.FilterNext, k.FilterPrev, k.LayoutCycle},
+		{k.Search, k.Command, k.Help, k.Quit},
+	}
+}
+
+// searchState owns the / mode input. Wraps bubbles/textinput so we
+// get paste, ctrl-w, ctrl-a/e, etc. for free; the query string is
+// just textinput.Value().
+type searchState struct {
+	textinput.Model
+}
+
+func newSearchState() searchState {
+	ti := textinput.New()
+	ti.Prompt = ""
+	return searchState{Model: ti}
+}
+
+// Value returns the current search query. Convenience so callers
+// don't need to call .Model.Value().
+func (s *searchState) Value() string { return s.Model.Value() }
 
 // commandState mirrors searchState for : mode.
 type commandState struct {
-	input string
+	textinput.Model
 }
 
-func newCommandState() commandState { return commandState{} }
+func newCommandState() commandState {
+	ti := textinput.New()
+	ti.Prompt = ""
+	return commandState{Model: ti}
+}
 
-func (c *commandState) reset() { c.input = "" }
+func (c *commandState) Value() string { return c.Model.Value() }
+
+func (c *commandState) reset() {
+	c.Model.SetValue("")
+}
 
 // handleBoardKey handles normal-mode keys for the split board.
 // Movement keys route by focused pane:
-//   - j/k/gg/G/ctrl+d/ctrl+u: both panes — move the nav cursor (and
-//     reload the preview) when nav is focused, scroll the preview
-//     viewport when preview is focused.
-//   - ctrl+f/ctrl+b: preview only — full-page scroll. They have no
-//     binding when nav is focused; nav uses ctrl+d/ctrl+u for paging.
+//   - Up/Down/Top/Bottom/JumpDown/JumpUp: both panes — move the nav
+//     cursor (and reload the preview) when nav is focused, scroll
+//     the preview viewport when preview is focused.
+//   - ScrollPgDown/ScrollPgUp: preview only — full-page scroll.
 //
 // Filter cycle, transitions, search, command-mode, edit and quit
 // work regardless of focused pane.
-func (m *Model) handleBoardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	key := msg.String()
-
+func (m *Model) handleBoardKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// gg sequence: track whether the previous keystroke was "g" so
 	// a second "g" jumps to top of whichever pane is focused. Any
 	// other key clears the flag.
-	if key == "g" {
+	if key.Matches(msg, m.keys.Top) {
 		if m.gPending {
 			if m.focused == focusPreview {
 				m.preview.scrollToTop()
@@ -62,135 +222,142 @@ func (m *Model) handleBoardKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	m.gPending = false
 
-	switch key {
-	case "q":
+	switch {
+	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
-	case "tab":
+	case key.Matches(msg, m.keys.FocusNext):
 		m.focused = (m.focused + 1) % numPanes
 		return m, nil
-	case "shift+tab":
+	case key.Matches(msg, m.keys.FocusPrev):
 		m.focused = (m.focused + numPanes - 1) % numPanes
 		return m, nil
-	case "j", "down":
+	case key.Matches(msg, m.keys.Down):
 		if m.focused == focusPreview {
 			m.preview.scrollLineDown()
 		} else {
 			m.board_.moveCursor(1)
 			m.refreshPreview()
 		}
-	case "k", "up":
+	case key.Matches(msg, m.keys.Up):
 		if m.focused == focusPreview {
 			m.preview.scrollLineUp()
 		} else {
 			m.board_.moveCursor(-1)
 			m.refreshPreview()
 		}
-	case "G":
+	case key.Matches(msg, m.keys.Bottom):
 		if m.focused == focusPreview {
 			m.preview.scrollToBottom()
 		} else {
 			m.board_.gotoLastCard()
 			m.refreshPreview()
 		}
-	case "ctrl+d", "pgdown":
+	case key.Matches(msg, m.keys.JumpDown):
 		if m.focused == focusPreview {
 			m.preview.scrollHalfPageDown()
 		} else {
 			m.board_.moveCursor(10)
 			m.refreshPreview()
 		}
-	case "ctrl+u", "pgup":
+	case key.Matches(msg, m.keys.JumpUp):
 		if m.focused == focusPreview {
 			m.preview.scrollHalfPageUp()
 		} else {
 			m.board_.moveCursor(-10)
 			m.refreshPreview()
 		}
-	case "ctrl+f":
+	case key.Matches(msg, m.keys.ScrollPgDown):
 		if m.focused == focusPreview {
 			m.preview.scrollPageDown()
 		}
-	case "ctrl+b":
+	case key.Matches(msg, m.keys.ScrollPgUp):
 		if m.focused == focusPreview {
 			m.preview.scrollPageUp()
 		}
-	case "/":
+	case key.Matches(msg, m.keys.Search):
 		m.input = modeSearch
-		m.search.query = ""
+		m.search.reset()
 		m.board_.applyFilter("")
-	case "enter", "e", "o":
+		return m, m.search.Focus()
+	case key.Matches(msg, m.keys.Edit):
 		if e := m.board_.selectedCard(); e != nil {
 			return m, m.editCmd(e.ID)
 		}
-	case "a":
+	case key.Matches(msg, m.keys.Activate):
 		return m, m.transitionCmd("activate")
-	case "p":
+	case key.Matches(msg, m.keys.Park):
 		return m, m.transitionCmd("park")
-	case "d":
+	case key.Matches(msg, m.keys.Done):
 		if m.preview.card != nil && len(m.preview.card.Contract) > 0 {
 			m.status = fmt.Sprintf("contract has %d item(s); use `focus done %d` from CLI", len(m.preview.card.Contract), m.preview.card.ID)
 			return m, nil
 		}
 		return m, m.transitionCmd("done")
-	case "K":
+	case key.Matches(msg, m.keys.Kill):
 		return m, m.transitionCmd("kill")
-	case "r":
+	case key.Matches(msg, m.keys.Revive):
 		return m, m.transitionCmd("revive")
-	case "l":
+	case key.Matches(msg, m.keys.FilterNext):
 		next := m.board_.filter.next()
 		return m, reloadCmd(m.board, next, 0)
-	case "h":
+	case key.Matches(msg, m.keys.FilterPrev):
 		prev := m.board_.filter.prev()
 		return m, reloadCmd(m.board, prev, 0)
-	case "s":
+	case key.Matches(msg, m.keys.LayoutCycle):
 		m.split = m.split.next()
 		m.status = "layout: " + m.split.label()
 	}
 	return m, nil
 }
 
+// reset clears the search buffer.
+func (s *searchState) reset() {
+	s.Model.SetValue("")
+}
+
 // handleSearchKey handles key events while in / mode. Search is
 // live: every keystroke filters the visible nav rows. Esc clears
 // the query and exits search mode; enter just exits search mode but
-// keeps the filter applied so the user can keep navigating with
-// j/k over the matched set.
-func (m *Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+// keeps the filter applied.
+func (m *Model) handleSearchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.input = modeNormal
-		m.search.query = ""
+		m.search.reset()
+		m.search.Blur()
 		m.status = ""
 		m.board_.applyFilter("")
 		m.refreshPreview()
 		return m, nil
 	case "enter":
 		m.input = modeNormal
+		m.search.Blur()
 		m.status = ""
 		return m, nil
-	case "backspace":
-		if len(m.search.query) > 0 {
-			m.search.query = m.search.query[:len(m.search.query)-1]
-		}
-		m.board_.applyFilter(m.search.query)
-		m.updateNoMatchesStatus()
-		m.refreshPreview()
-		return m, nil
 	}
-	if isPrintable(msg) {
-		m.search.query += msg.String()
-		m.board_.applyFilter(m.search.query)
-		m.updateNoMatchesStatus()
-		m.refreshPreview()
-	}
-	return m, nil
+	var cmd tea.Cmd
+	m.search.Model, cmd = m.search.Model.Update(msg)
+	m.board_.applyFilter(m.search.Value())
+	m.updateNoMatchesStatus()
+	m.refreshPreview()
+	return m, cmd
+}
+
+// handleSearchPaste handles tea.PasteMsg in search mode.
+func (m *Model) handleSearchPaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.search.Model, cmd = m.search.Model.Update(msg)
+	m.board_.applyFilter(m.search.Value())
+	m.updateNoMatchesStatus()
+	m.refreshPreview()
+	return m, cmd
 }
 
 // updateNoMatchesStatus sets m.status to a feedback message based on
 // the current filtered row count, or clears it if at least one match
-// is visible. Cleared on every keystroke so the message tracks the
-// live query rather than sticking around forever.
+// is visible.
 func (m *Model) updateNoMatchesStatus() {
-	if m.search.query == "" {
+	if m.search.Value() == "" {
 		m.status = ""
 		return
 	}
@@ -208,51 +375,33 @@ func (m *Model) updateNoMatchesStatus() {
 }
 
 // handleCommandKey handles : mode.
-func (m *Model) handleCommandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleCommandKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.input = modeNormal
+		m.command.Blur()
 		return m, nil
 	case "enter":
-		cmd := m.runCommandLine(m.command.input)
+		cmd := m.runCommandLine(m.command.Value())
 		m.input = modeNormal
 		m.command.reset()
+		m.command.Blur()
 		return m, cmd
-	case "backspace":
-		if len(m.command.input) > 0 {
-			m.command.input = m.command.input[:len(m.command.input)-1]
-		}
-		return m, nil
 	}
-	if isPrintable(msg) {
-		m.command.input += msg.String()
-	}
-	return m, nil
+	var cmd tea.Cmd
+	m.command.Model, cmd = m.command.Model.Update(msg)
+	return m, cmd
 }
 
-// isPrintable reports whether a key event is a printable character
-// we should append to a search/command buffer. Bubble Tea reports
-// most printable characters as KeyRunes but space gets its own
-// dedicated KeySpace type, which we accept too.
-func isPrintable(msg tea.KeyMsg) bool {
-	if msg.Type == tea.KeySpace {
-		return true
-	}
-	if msg.Type != tea.KeyRunes {
-		return false
-	}
-	for _, r := range msg.Runes {
-		if r < 0x20 {
-			return false
-		}
-	}
-	return true
+// handleCommandPaste handles tea.PasteMsg in command mode.
+func (m *Model) handleCommandPaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.command.Model, cmd = m.command.Model.Update(msg)
+	return m, cmd
 }
 
 // transitionCmd is the command issued when the user presses a, p,
-// d, K, or r in board view. Runs the transition off the
-// message-handling goroutine, then triggers a reload so the screen
-// reflects reality.
+// d, K, or r in board view.
 func (m *Model) transitionCmd(name string) tea.Cmd {
 	e := m.board_.selectedCard()
 	if e == nil {
@@ -270,8 +419,7 @@ func (m *Model) transitionCmd(name string) tea.Cmd {
 }
 
 // runTransition dispatches by name to the right board op. Force is
-// always false from the TUI; users who need --force can drop to the
-// CLI.
+// always false from the TUI.
 func runTransition(b *board.Board, name string, id int) error {
 	switch name {
 	case "activate":
@@ -327,10 +475,11 @@ func (m *Model) runCommandLine(line string) tea.Cmd {
 		if rest == "" {
 			return func() tea.Msg { return statusMsg("usage: :new <title>") }
 		}
+		title := strings.Trim(rest, `"'`)
 		board_ := m.board
 		filter := m.board_.filter
 		return func() tea.Msg {
-			c, _, err := board_.NewCard(rest, board.NewCardOpts{})
+			c, _, err := board_.NewCard(title, board.NewCardOpts{})
 			if err != nil {
 				return statusMsg("new: " + err.Error())
 			}
@@ -338,8 +487,6 @@ func (m *Model) runCommandLine(line string) tea.Cmd {
 		}
 	}
 
-	// Unknown commands: silently no-op rather than yelling, matching
-	// vim's behavior on unknown ":foo".
 	return func() tea.Msg { return statusMsg("unknown command: " + cmd) }
 }
 
