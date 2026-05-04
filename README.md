@@ -57,6 +57,24 @@ curl -L "https://github.com/evanstern/focus/releases/download/${VERSION}/focus-$
 sudo mv focus /usr/local/bin/
 ```
 
+## Shell completions
+
+`focus completions <shell>` prints a completion script to stdout.
+Subcommands, card ids, statuses, priorities, and types complete on
+`<TAB>`. Card-id completions are filtered by command: `focus done <TAB>`
+only offers active cards, `focus revive <TAB>` only archived ones.
+
+```bash
+# bash — add to ~/.bashrc
+eval "$(focus completions bash)"
+
+# zsh — add to ~/.zshrc (after compinit)
+eval "$(focus completions zsh)"
+
+# fish
+focus completions fish > ~/.config/fish/completions/focus.fish
+```
+
 ## Quickstart
 
 ```bash
