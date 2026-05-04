@@ -7,8 +7,8 @@ import (
 	"github.com/evanstern/focus/internal/board"
 	"github.com/evanstern/focus/internal/board/card"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	"github.com/charmbracelet/glamour"
+	"charm.land/bubbles/v2/viewport"
+	"charm.land/glamour/v2"
 )
 
 // previewModel renders a single card's frontmatter header + body in
@@ -27,8 +27,7 @@ type previewModel struct {
 	viewport viewport.Model
 
 	// rendered caches the glamour-rendered body keyed by card id +
-	// wrap width. Width is in the key because glamour reflows on
-	// resize and the wrapped output is what we want to cache.
+	// wrap width.
 	rendered map[previewKey]string
 
 	// lastWidth/lastHeight track what we last sized the viewport to,
@@ -45,26 +44,15 @@ type previewKey struct {
 func newPreviewModel(b *board.Board) previewModel {
 	return previewModel{
 		board:    b,
-		viewport: viewport.New(0, 0),
+		viewport: viewport.New(),
 		rendered: make(map[previewKey]string),
 	}
 }
 
-// load fetches a card by id. Cheap to call on every cursor move; the
-// board package reads from the disk file each time, but we cache the
-// glamour render which is the expensive bit.
-//
-// Forces the viewport to be re-populated on next view(): frontmatter
-// fields (status, priority, tags, ...) may have changed even when the
-// id is the same (e.g. after a transition like activate/done), and
-// the cached viewport content would otherwise stay stale until a
-// resize.
-//
-// Resets the viewport scroll position to top whenever the loaded
-// card's id changes — by design, we don't preserve per-card scroll
-// across cursor moves. Same-id reloads keep their YOffset so a
-// transition doesn't yank the user away from where they were
-// reading.
+// load fetches a card by id. Resets the viewport scroll position to
+// top whenever the loaded card's id changes; same-id reloads keep
+// their YOffset so a transition doesn't yank the user away from
+// where they were reading.
 func (m *previewModel) load(id int) error {
 	c, _, err := m.board.LoadCard(id)
 	if err != nil {
@@ -90,10 +78,7 @@ const (
 	previewPadY = 1
 )
 
-// view renders the preview pane to fit width × height. The viewport
-// occupies the area inside the (previewPadX, previewPadY) inset; the
-// glamour-rendered body wraps to viewport.Width - 2 to match the
-// pre-viewport convention.
+// view renders the preview pane to fit width × height.
 func (m *previewModel) view(width, height int) string {
 	if m.card == nil {
 		return ""
@@ -112,8 +97,8 @@ func (m *previewModel) view(width, height int) string {
 	}
 
 	if innerW != m.lastWidth || innerH != m.lastHeight {
-		m.viewport.Width = innerW
-		m.viewport.Height = innerH
+		m.viewport.SetWidth(innerW)
+		m.viewport.SetHeight(innerH)
 		m.viewport.SetContent(m.buildContent(innerW))
 		m.lastWidth = innerW
 		m.lastHeight = innerH
@@ -155,8 +140,7 @@ func (m *previewModel) buildContent(innerW int) string {
 }
 
 // padInsidePane prepends padX spaces to every line and adds padY
-// blank rows at the top and bottom. Used to inset content from a
-// surrounding border.
+// blank rows at the top and bottom.
 func padInsidePane(s string, padX, padY int) string {
 	if padX == 0 && padY == 0 {
 		return s
@@ -177,11 +161,9 @@ func padInsidePane(s string, padX, padY int) string {
 	return strings.Join(lines, "\n")
 }
 
-// renderBody styles the card body with glamour, wrapping to the
-// supplied width. With our paragraph-shaped body convention,
-// glamour's word-wrap is the right thing: it reflows paragraphs to
-// width while preserving the structural line breaks (lists, code
-// fences, headings).
+// renderBody styles the card body with glamour, wrapping to width.
+// Glamour v2 dropped WithAutoStyle; "dark" is the default and matches
+// the lipgloss palette we use elsewhere.
 func (m *previewModel) renderBody(width int) string {
 	if m.card == nil {
 		return ""
@@ -195,7 +177,7 @@ func (m *previewModel) renderBody(width int) string {
 		return cached
 	}
 	r, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
+		glamour.WithStandardStyle("dark"),
 		glamour.WithWordWrap(w),
 	)
 	if err != nil {
@@ -210,8 +192,7 @@ func (m *previewModel) renderBody(width int) string {
 }
 
 // invalidate drops cached renders for this card and resets the
-// viewport scroll position to top. Called after transitions or
-// edits where the on-disk content may have changed.
+// viewport scroll position to top.
 func (m *previewModel) invalidate(id int) {
 	for k := range m.rendered {
 		if k.id == id {
@@ -224,10 +205,9 @@ func (m *previewModel) invalidate(id int) {
 }
 
 // scrollLineDown / scrollLineUp / scrollHalfPageDown etc. wrap the
-// viewport's scroll methods so the key handler doesn't have to
-// reach through previewModel.viewport directly.
-func (m *previewModel) scrollLineDown()     { m.viewport.LineDown(1) }
-func (m *previewModel) scrollLineUp()       { m.viewport.LineUp(1) }
+// viewport's scroll methods.
+func (m *previewModel) scrollLineDown()     { m.viewport.ScrollDown(1) }
+func (m *previewModel) scrollLineUp()       { m.viewport.ScrollUp(1) }
 func (m *previewModel) scrollHalfPageDown() { m.viewport.HalfPageDown() }
 func (m *previewModel) scrollHalfPageUp()   { m.viewport.HalfPageUp() }
 func (m *previewModel) scrollPageDown()     { m.viewport.PageDown() }

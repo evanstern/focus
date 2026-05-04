@@ -20,56 +20,55 @@ import (
 	"github.com/evanstern/focus/internal/board"
 	"github.com/evanstern/focus/internal/editor"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	"github.com/charmbracelet/colorprofile"
+
+	tea "charm.land/bubbletea/v2"
+
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
 )
 
 // Run boots the TUI program against the given board and runs until
 // the user quits. Caller is responsible for board resolution; this
 // matches the CLI handler shape (open the board, hand it to the TUI).
 //
-// We pin the lipgloss default renderer's color profile based on
-// TERM/COLORTERM. termenv's auto-detection sometimes returns Ascii
-// in tmux/screen contexts where colors actually work fine; the pin
-// makes the TUI's colors deterministic.
+// We pass the color profile via tea.WithColorProfile based on
+// TERM/COLORTERM. v2 dropped lipgloss's global default renderer so
+// the program-level option is now the way to pin profile detection
+// in tmux/screen contexts where auto-detection returns Ascii.
 func Run(b *board.Board) error {
-	lipgloss.SetColorProfile(detectProfile())
-
 	m, err := newModel(b)
 	if err != nil {
 		return err
 	}
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithColorProfile(detectProfile()))
 	_, err = p.Run()
 	return err
 }
 
 // detectProfile picks a sensible color profile from environment
-// variables. termenv's own ColorProfile() is gated on isTTY(stdout)
-// which can return false when bubbletea is initializing the program
-// before our renderer takes over. We replicate the env-only pieces
-// of termenv's detection here so we always get color in the common
-// terminals.
-func detectProfile() termenv.Profile {
+// variables. The runtime's auto-detection can return Ascii when the
+// stdout TTY check fails during program init; this env-only sniff
+// keeps colors deterministic across the common terminals.
+func detectProfile() colorprofile.Profile {
 	switch os.Getenv("COLORTERM") {
 	case "24bit", "truecolor":
-		return termenv.TrueColor
+		return colorprofile.TrueColor
 	case "yes", "true":
-		return termenv.ANSI256
+		return colorprofile.ANSI256
 	}
 	term := os.Getenv("TERM")
 	switch term {
 	case "alacritty", "wezterm", "xterm-kitty", "xterm-ghostty", "rio", "contour":
-		return termenv.TrueColor
+		return colorprofile.TrueColor
 	}
 	if strings.Contains(term, "256color") {
-		return termenv.ANSI256
+		return colorprofile.ANSI256
 	}
 	if strings.Contains(term, "color") || strings.Contains(term, "ansi") {
-		return termenv.ANSI
+		return colorprofile.ANSI
 	}
-	return termenv.ANSI256
+	return colorprofile.ANSI256
 }
 
 // viewMode is the top-level state enum. Two modes only: the split
@@ -144,9 +143,10 @@ type Model struct {
 	width  int
 	height int
 
+	keys     KeyMap
 	board_   boardModel
 	preview  previewModel
-	help     helpModel
+	help     help.Model
 	search   searchState
 	command  commandState
 	gPending bool
@@ -165,9 +165,10 @@ func newModel(b *board.Board) (*Model, error) {
 		board:   b,
 		view:    viewBoard,
 		input:   modeNormal,
+		keys:    DefaultKeyMap(),
 		board_:  bm,
 		preview: newPreviewModel(b),
-		help:    newHelpModel(),
+		help:    help.New(),
 		search:  newSearchState(),
 		command: newCommandState(),
 	}, nil
@@ -186,11 +187,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.help.SetWidth(msg.Width)
 		return m, nil
 
 	case reloadedMsg:
 		m.board_.applyReload(msg, msg.preserveID)
-		m.board_.applyFilter(m.search.query)
+		m.board_.applyFilter(m.search.Value())
 		m.status = ""
 		m.refreshPreview()
 		return m, nil
@@ -208,15 +210,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, reloadCmd(m.board, m.board_.filter, msg.id)
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+
+	case tea.PasteMsg:
+		// In v2, paste arrives as its own message type. Hand it to
+		// whichever input is open; in normal mode we silently drop it.
+		if m.input == modeSearch {
+			return m.handleSearchPaste(msg)
+		}
+		if m.input == modeCommand {
+			return m.handleCommandPaste(msg)
+		}
+		return m, nil
 	}
 	return m, nil
 }
 
 // handleKey is the central key router. Modal first (search /
 // command override most other handling), then per-view routing.
-func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.input == modeSearch {
 		return m.handleSearchKey(msg)
 	}
@@ -225,27 +238,29 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Global keys regardless of view.
-	switch msg.String() {
-	case "ctrl+c":
+	switch {
+	case msg.Code == 'c' && msg.Mod == tea.ModCtrl:
 		return m, tea.Quit
-	case "?":
+	case key.Matches(msg, m.keys.Help):
 		if m.view == viewHelp {
 			m.view = viewBoard
 		} else {
 			m.view = viewHelp
 		}
 		return m, nil
-	case ":":
+	case key.Matches(msg, m.keys.Command):
 		m.input = modeCommand
 		m.command.reset()
-		return m, nil
+		return m, m.command.Focus()
 	}
 
 	switch m.view {
 	case viewBoard:
 		return m.handleBoardKey(msg)
 	case viewHelp:
-		if msg.String() == "esc" || msg.String() == "q" {
+		// Esc / q dismiss help. Quit is handled above.
+		s := msg.String()
+		if s == "esc" || s == "q" {
 			m.view = viewBoard
 		}
 		return m, nil
@@ -269,16 +284,21 @@ func (m *Model) refreshPreview() {
 
 // View renders the screen. Help overlays everything; otherwise we
 // render the bordered split board layout above a bordered status bar.
-func (m *Model) View() string {
+func (m *Model) View() tea.View {
+	var content string
 	if m.view == viewHelp {
-		return m.help.view() + "\n" + m.renderStatusBar()
+		content = m.help.View(m.keys) + "\n" + m.renderStatusBar()
+	} else {
+		bodyHeight := m.height - statusBarOuterHeight
+		if bodyHeight < 1 {
+			bodyHeight = 1
+		}
+		body := renderSplit(m.split, m.width, bodyHeight, m.focused, &m.board_, &m.preview)
+		content = body + "\n" + m.renderStatusBar()
 	}
-	bodyHeight := m.height - statusBarOuterHeight
-	if bodyHeight < 1 {
-		bodyHeight = 1
-	}
-	body := renderSplit(m.split, m.width, bodyHeight, m.focused, &m.board_, &m.preview)
-	return body + "\n" + m.renderStatusBar()
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
 }
 
 // statusBarOuterHeight is the row budget the bordered status bar
@@ -304,9 +324,9 @@ func (m *Model) statusContent() string {
 	case modeNormal:
 		mode = fmt.Sprintf("[%s]", m.board_.filter.label())
 	case modeSearch:
-		mode = "/" + m.search.query
+		mode = "/" + m.search.Value()
 	case modeCommand:
-		mode = ":" + m.command.input
+		mode = ":" + m.command.Value()
 	}
 	if m.status != "" {
 		return fmt.Sprintf("%s  %s", mode, m.status)
