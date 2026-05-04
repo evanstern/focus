@@ -244,8 +244,10 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Help):
 		if m.view == viewHelp {
 			m.view = viewBoard
+			m.help.ShowAll = false
 		} else {
 			m.view = viewHelp
+			m.help.ShowAll = true
 		}
 		return m, nil
 	case key.Matches(msg, m.keys.Command):
