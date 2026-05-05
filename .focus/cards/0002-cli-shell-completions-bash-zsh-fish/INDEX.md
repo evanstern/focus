@@ -4,7 +4,7 @@ id: 2
 uuid: 019def84-2542-7dd7-911b-b56c61716edd
 title: CLI shell completions (bash + zsh + fish)
 type: card
-status: backlog
+status: archived
 priority: p2
 project: focus
 created: 2026-05-03
