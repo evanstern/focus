@@ -239,7 +239,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// Global keys regardless of view.
 	switch {
-	case msg.Code == 'c' && msg.Mod == tea.ModCtrl:
+	case key.Matches(msg, m.keys.ForceQuit):
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Help):
 		if m.view == viewHelp {
@@ -261,8 +261,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleBoardKey(msg)
 	case viewHelp:
 		// Esc / q dismiss help. Quit is handled above.
-		s := msg.String()
-		if s == "esc" || s == "q" {
+		if key.Matches(msg, m.keys.Cancel) || key.Matches(msg, m.keys.Dismiss) {
 			m.view = viewBoard
 		}
 		return m, nil
