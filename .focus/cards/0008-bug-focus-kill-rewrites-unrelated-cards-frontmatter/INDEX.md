@@ -11,6 +11,11 @@ created: 2026-05-05
 tags: [bug, cli, data-integrity]
 ---
 
+> **Merged into card #0006** for delivery (single feature
+> session covers TUI cleanup + #0008 + #0009). This card stays
+> in backlog as searchable history; it'll be archived when
+> #0006 ships. The contract bullets are duplicated on #0006.
+
 ## Summary
 
 `focus kill <id>` modified the frontmatter of an **unrelated**
