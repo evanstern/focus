@@ -172,7 +172,8 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		{k.Up, k.Down, k.Top, k.Bottom, k.JumpDown, k.JumpUp, k.ScrollPgDown, k.ScrollPgUp},
 		{k.Edit, k.Activate, k.Park, k.Done, k.Kill, k.Revive},
 		{k.FilterNext, k.FilterPrev, k.LayoutCycle},
-		{k.Search, k.Command, k.Help, k.Quit},
+		{k.Search, k.Command, k.Help, k.Quit, k.ForceQuit},
+		{k.Cancel, k.Confirm, k.Dismiss},
 	}
 }
 

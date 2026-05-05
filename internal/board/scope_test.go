@@ -300,6 +300,63 @@ func TestSetBodyPreservesFrontmatter(t *testing.T) {
 	}
 }
 
+// TestRoundTripPreservesCRLF guards against a bug where MarshalUpdate
+// hardcoded "---\n" delimiters and produced mixed line endings on
+// CRLF-saved cards (Parse explicitly tolerates CRLF input).
+func TestRoundTripPreservesCRLF(t *testing.T) {
+	original := "---\r\nschema_version: 2\r\nid: 11\r\nuuid: 019dfa36-1111-2222-3333-444455556666\r\ntitle: CRLF card\r\ntype: card\r\nstatus: backlog\r\npriority: p2\r\nproject: focus\r\ncreated: 2026-05-05\r\n---\r\nBody line one.\r\nBody line two.\r\n"
+
+	c, err := card.Parse([]byte(original))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	c.Status = card.StatusArchived
+	out, err := card.MarshalUpdate(c)
+	if err != nil {
+		t.Fatalf("MarshalUpdate: %v", err)
+	}
+	if strings.Contains(string(out), "\r\n") == false {
+		t.Errorf("CRLF lost on save:\n%q", out)
+	}
+	if strings.Contains(string(out), "---\n") && !strings.Contains(string(out), "---\r\n") {
+		t.Errorf("delimiter line ending downgraded to LF on a CRLF card:\n%q", out)
+	}
+}
+
+// TestEmptyScalarValueRewritten guards against a bug where a top-level
+// "<key>:" with no inline value got treated as a block header and the
+// update was silently dropped. Real example: a card with `epic:`
+// (literal empty scalar) being assigned an epic should rewrite the
+// line to `epic: <id>`, not skip it.
+func TestEmptyScalarValueRewritten(t *testing.T) {
+	original := `---
+schema_version: 2
+id: 12
+uuid: 019dfa36-2222-3333-4444-555566667777
+title: Empty scalar
+type: card
+status: backlog
+priority: p2
+project: focus
+created: 2026-05-05
+owner:
+---
+Body.
+`
+	c, err := card.Parse([]byte(original))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	c.Owner = "ash"
+	out, err := card.MarshalUpdate(c)
+	if err != nil {
+		t.Fatalf("MarshalUpdate: %v", err)
+	}
+	if !strings.Contains(string(out), "owner: ash") {
+		t.Errorf("empty scalar not rewritten:\n%s", out)
+	}
+}
+
 func frontmatterOf(t *testing.T, data []byte) string {
 	t.Helper()
 	parts := strings.SplitN(string(data), "\n---\n", 2)

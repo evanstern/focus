@@ -10,9 +10,14 @@ import (
 
 // MarshalUpdate returns INDEX.md bytes for c using c.Raw as the
 // byte-preserving baseline. Only the frontmatter keys whose values
-// changed since c was Parse'd are rewritten; everything else passes
-// through verbatim, including body bytes, comments, blank lines, and
-// the original flow style of unchanged keys.
+// changed since c was Parse'd are rewritten; unchanged lines pass
+// through verbatim (including blank lines, indentation, comments on
+// their own line, and the original flow style of unchanged keys).
+// The body region after the closing "---" passes through verbatim.
+//
+// Caveat: rewriting a scalar value drops a trailing inline comment
+// on that same line, since the YAML decoder doesn't surface it.
+// Comments on their own lines are unaffected.
 //
 // Falls back to Marshal if c.Raw is empty (a card built from scratch
 // has nothing to preserve).
@@ -40,15 +45,33 @@ func MarshalUpdate(c *Card) ([]byte, error) {
 		return nil, err
 	}
 
+	eol := detectEOL(c.Raw)
+
 	var out bytes.Buffer
-	out.WriteString("---\n")
+	out.WriteString("---" + eol)
 	out.Write(newFM)
 	if len(newFM) > 0 && newFM[len(newFM)-1] != '\n' {
-		out.WriteByte('\n')
+		out.WriteString(eol)
 	}
-	out.WriteString("---\n")
+	out.WriteString("---" + eol)
 	out.WriteString(c.Body)
 	return out.Bytes(), nil
+}
+
+// detectEOL inspects the original card bytes and returns "\r\n" when
+// the file uses CRLF line endings, "\n" otherwise. Used so
+// MarshalUpdate emits frontmatter delimiters in the file's native
+// EOL style instead of forcing LF on a CRLF file.
+func detectEOL(raw []byte) string {
+	for i := 0; i < len(raw); i++ {
+		if raw[i] == '\n' {
+			if i > 0 && raw[i-1] == '\r' {
+				return "\r\n"
+			}
+			return "\n"
+		}
+	}
+	return "\n"
 }
 
 func diffFrontmatter(orig, next *Card) (updates map[string]string, inserts []keyValue, err error) {
@@ -209,7 +232,7 @@ func applyFrontmatterEdits(fm []byte, updates map[string]string, inserts []keyVa
 	out := make([][]byte, 0, len(lines))
 
 	inBlockScalar := false
-	for _, line := range lines {
+	for i, line := range lines {
 		text := stripLineEnding(line)
 		if inBlockScalar {
 			if isTopLevelKeyLine(text) {
@@ -220,13 +243,13 @@ func applyFrontmatterEdits(fm []byte, updates map[string]string, inserts []keyVa
 			}
 		}
 
-		key, _, _, isTL := parseTopLevelScalarLine(text)
+		key, _, hasValue, isTL := parseTopLevelScalarLine(text)
 		if !isTL {
 			out = append(out, line)
 			continue
 		}
 
-		if isBlockScalarHeader(text) {
+		if !hasValue && hasIndentedFollower(lines, i+1) {
 			inBlockScalar = true
 			out = append(out, line)
 			continue
@@ -244,11 +267,18 @@ func applyFrontmatterEdits(fm []byte, updates map[string]string, inserts []keyVa
 		out = append(out, line)
 	}
 
+	eol := "\n"
+	if len(lines) > 0 {
+		eol = lineEnding(lines[0])
+		if eol == "" {
+			eol = "\n"
+		}
+	}
 	for _, kv := range inserts {
 		if kv.value == "" {
 			continue
 		}
-		out = append(out, []byte(kv.key+": "+yamlScalar(kv.value)+"\n"))
+		out = append(out, []byte(kv.key+": "+yamlScalar(kv.value)+eol))
 	}
 
 	var buf bytes.Buffer
@@ -331,17 +361,21 @@ func parseTopLevelScalarLine(line string) (key, value string, hasValue, isTopLev
 	return key, rest, true, true
 }
 
-// isBlockScalarHeader reports whether line is a "<key>:" with no
-// inline value (the next indented lines belong to it as a block list,
-// block mapping, or block scalar). Uses the same column-0 rule as
-// isTopLevelKeyLine.
-func isBlockScalarHeader(line string) bool {
-	key, _, hasValue, isTL := parseTopLevelScalarLine(line)
-	if !isTL {
-		return false
+// hasIndentedFollower reports whether the next non-blank line at or
+// after start is indented (i.e. continues a block list, block
+// mapping, or block scalar started by a "<key>:" header at the
+// previous line). Returns false at EOF or if the next non-blank line
+// is itself a top-level key — in that case the bare "<key>:" was an
+// empty scalar, not a block header.
+func hasIndentedFollower(lines [][]byte, start int) bool {
+	for j := start; j < len(lines); j++ {
+		text := stripLineEnding(lines[j])
+		if text == "" {
+			continue
+		}
+		return text[0] == ' ' || text[0] == '\t'
 	}
-	_ = key
-	return !hasValue
+	return false
 }
 
 // rewriteScalarValue replaces the value portion of a "<key>: <value>"

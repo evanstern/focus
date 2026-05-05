@@ -75,4 +75,7 @@ func TestHelpViewRendersFromKeyMap(t *testing.T) {
 	if !strings.Contains(out, "focus next pane") {
 		t.Errorf("help view missing FocusNext description: %q", out)
 	}
+	if !strings.Contains(out, "ctrl+c") || !strings.Contains(out, "any mode") {
+		t.Errorf("help view missing ForceQuit (ctrl+c quit any mode): %q", out)
+	}
 }
