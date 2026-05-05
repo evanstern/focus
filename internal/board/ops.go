@@ -148,7 +148,7 @@ func (b *Board) LoadCard(id int) (*card.Card, string, error) {
 // row. Caller must hold the lock — this is a building block for the
 // transition operations below, not a public mutation primitive.
 func (b *Board) saveCardLocked(c *card.Card, dirName string, idx *index.Index) error {
-	data, err := card.Marshal(c)
+	data, err := card.MarshalUpdate(c)
 	if err != nil {
 		return err
 	}
