@@ -4,7 +4,7 @@ id: 8
 uuid: 019dfa36-8e2c-7659-bbef-5da960c23e1b
 title: 'Bug: focus kill rewrites unrelated cards'' frontmatter'
 type: card
-status: backlog
+status: archived
 priority: p1
 project: focus
 created: 2026-05-05

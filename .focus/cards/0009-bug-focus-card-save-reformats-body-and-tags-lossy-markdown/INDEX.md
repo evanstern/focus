@@ -4,7 +4,7 @@ id: 9
 uuid: 019dfa36-8e3b-7345-91c4-fd65791dea48
 title: 'Bug: focus card save reformats body and tags (lossy markdown round-trip)'
 type: card
-status: backlog
+status: archived
 priority: p1
 project: focus
 created: 2026-05-05

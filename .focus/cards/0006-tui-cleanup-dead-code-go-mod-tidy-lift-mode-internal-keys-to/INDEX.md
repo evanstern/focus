@@ -4,7 +4,7 @@ id: 6
 uuid: 019df141-1cdc-7360-bec3-2dbb47fd0412
 title: 'TUI cleanup + fix card-save scope and round-trip bugs'
 type: card
-status: backlog
+status: archived
 priority: p1
 project: focus
 created: 2026-05-04
