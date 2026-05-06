@@ -2,11 +2,9 @@ package tui
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/evanstern/focus/internal/board"
-	"github.com/evanstern/focus/internal/board/card"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -39,7 +37,10 @@ type KeyMap struct {
 	Edit, Activate, Park, Done, Kill, Revive key.Binding
 
 	// Modes
-	Search, Command, Help, Quit key.Binding
+	Search, Command, Help, Quit, ForceQuit key.Binding
+
+	// Mode-internal escapes (search/command/help)
+	Cancel, Confirm, Dismiss key.Binding
 }
 
 // DefaultKeyMap returns the canonical keybinding set, matching the
@@ -138,6 +139,22 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("q", "ctrl+c"),
 			key.WithHelp("q", "quit"),
 		),
+		ForceQuit: key.NewBinding(
+			key.WithKeys("ctrl+c"),
+			key.WithHelp("ctrl+c", "quit (any mode)"),
+		),
+		Cancel: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "cancel"),
+		),
+		Confirm: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "confirm"),
+		),
+		Dismiss: key.NewBinding(
+			key.WithKeys("q"),
+			key.WithHelp("q", "dismiss"),
+		),
 	}
 }
 
@@ -155,7 +172,8 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		{k.Up, k.Down, k.Top, k.Bottom, k.JumpDown, k.JumpUp, k.ScrollPgDown, k.ScrollPgUp},
 		{k.Edit, k.Activate, k.Park, k.Done, k.Kill, k.Revive},
 		{k.FilterNext, k.FilterPrev, k.LayoutCycle},
-		{k.Search, k.Command, k.Help, k.Quit},
+		{k.Search, k.Command, k.Help, k.Quit, k.ForceQuit},
+		{k.Cancel, k.Confirm, k.Dismiss},
 	}
 }
 
@@ -320,8 +338,8 @@ func (s *searchState) reset() {
 // the query and exits search mode; enter just exits search mode but
 // keeps the filter applied.
 func (m *Model) handleSearchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
+	switch {
+	case key.Matches(msg, m.keys.Cancel):
 		m.input = modeNormal
 		m.search.reset()
 		m.search.Blur()
@@ -329,7 +347,7 @@ func (m *Model) handleSearchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.board_.applyFilter("")
 		m.refreshPreview()
 		return m, nil
-	case "enter":
+	case key.Matches(msg, m.keys.Confirm):
 		m.input = modeNormal
 		m.search.Blur()
 		m.status = ""
@@ -376,12 +394,12 @@ func (m *Model) updateNoMatchesStatus() {
 
 // handleCommandKey handles : mode.
 func (m *Model) handleCommandKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
+	switch {
+	case key.Matches(msg, m.keys.Cancel):
 		m.input = modeNormal
 		m.command.Blur()
 		return m, nil
-	case "enter":
+	case key.Matches(msg, m.keys.Confirm):
 		cmd := m.runCommandLine(m.command.Value())
 		m.input = modeNormal
 		m.command.reset()
@@ -489,20 +507,3 @@ func (m *Model) runCommandLine(line string) tea.Cmd {
 
 	return func() tea.Msg { return statusMsg("unknown command: " + cmd) }
 }
-
-// idForRow extracts a card id from the cursor row label format. Used
-// by the help view's mock interactions in tests; not on a hot path.
-func idForRow(label string) (int, bool) {
-	if !strings.HasPrefix(label, "#") {
-		return 0, false
-	}
-	rest := strings.TrimSpace(strings.TrimPrefix(label, "#"))
-	tok := strings.SplitN(rest, " ", 2)[0]
-	id, err := strconv.Atoi(tok)
-	if err != nil {
-		return 0, false
-	}
-	return id, true
-}
-
-var _ = card.PaddedID

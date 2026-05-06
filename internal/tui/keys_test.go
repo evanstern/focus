@@ -43,6 +43,10 @@ func TestKeyMapMatchesEachBinding(t *testing.T) {
 		{"? → Help", tea.KeyPressMsg{Code: '?', Text: "?"}, km.Help},
 		{"q → Quit", tea.KeyPressMsg{Code: 'q', Text: "q"}, km.Quit},
 		{"ctrl+c → Quit", tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}, km.Quit},
+		{"ctrl+c → ForceQuit", tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}, km.ForceQuit},
+		{"esc → Cancel", tea.KeyPressMsg{Code: tea.KeyEscape}, km.Cancel},
+		{"enter → Confirm", tea.KeyPressMsg{Code: tea.KeyEnter}, km.Confirm},
+		{"q → Dismiss", tea.KeyPressMsg{Code: 'q', Text: "q"}, km.Dismiss},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -70,5 +74,8 @@ func TestHelpViewRendersFromKeyMap(t *testing.T) {
 	}
 	if !strings.Contains(out, "focus next pane") {
 		t.Errorf("help view missing FocusNext description: %q", out)
+	}
+	if !strings.Contains(out, "ctrl+c") || !strings.Contains(out, "any mode") {
+		t.Errorf("help view missing ForceQuit (ctrl+c quit any mode): %q", out)
 	}
 }

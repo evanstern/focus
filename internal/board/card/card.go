@@ -88,6 +88,14 @@ type Card struct {
 	// newline (or lack thereof) so round-trips are byte-clean as long
 	// as nothing in the frontmatter changes.
 	Body string `yaml:"-"`
+
+	// Raw holds the original on-disk bytes of the card if Parse was
+	// used to load it. MarshalUpdate uses Raw as the byte-preserving
+	// baseline so frontmatter mutations only rewrite the changed key
+	// (line-targeted) and the body region passes through verbatim.
+	// Cards built from scratch (e.g. NewCard) leave Raw nil and fall
+	// back to Marshal, which emits a fresh canonical form.
+	Raw []byte `yaml:"-"`
 }
 
 // knownFields is the set of frontmatter keys handled by typed Card
@@ -132,7 +140,7 @@ func Parse(data []byte) (*Card, error) {
 		return nil, fmt.Errorf("frontmatter yaml: %w", err)
 	}
 
-	c := &Card{Body: string(body)}
+	c := &Card{Body: string(body), Raw: append([]byte(nil), data...)}
 	if err := yaml.Unmarshal(fm, c); err != nil {
 		return nil, fmt.Errorf("frontmatter yaml typed decode: %w", err)
 	}
@@ -257,7 +265,7 @@ func Marshal(c *Card) ([]byte, error) {
 	out.WriteString("---\n")
 	out.Write(fm.Bytes())
 	out.WriteString("---\n")
-	out.WriteString(NormalizeBody(c.Body))
+	out.WriteString(c.Body)
 	return out.Bytes(), nil
 }
 
