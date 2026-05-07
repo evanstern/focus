@@ -18,8 +18,12 @@ When the TUI is running and an external process changes the board
 agent calling the MCP server), the TUI doesn't notice. The user
 sees stale state until they re-launch.
 
-This is a **design-discussion card.** Three plausible shapes
-with different cost/feel trade-offs.
+This started as a **design-discussion card** (three plausible
+shapes). **Decision locked 2026-05-06: Option A only** — manual
+reload binding. Build session `iris-tui-reload-key` spawned with
+the contract baked in. Auto-watch via fsnotify (option B) is
+deliberately deferred; if/when we want it, it gets its own card
+with its own design discussion.
 
 ## Three options
 
@@ -88,10 +92,12 @@ own feature card with a real design discussion.
 
 ## Done when
 
-- Decision made: A only / A + B / never.
-- If A: build card filed for the manual reload binding (small).
-- If B: build card filed with the design choices (debounce,
-  state preservation, modal-deferred redraws) locked.
+- [x] Decision made: **A only** (2026-05-06).
+- [ ] Build session `iris-tui-reload-key` lands its PR with the
+      manual reload binding shipped (this card archives at that
+      merge).
+- [ ] If we later want B: file a fresh card with debounce,
+      state preservation, and modal-deferred redraws locked.
 
 ## Evidence
 
