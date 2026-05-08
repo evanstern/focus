@@ -141,6 +141,13 @@ func TestResolveWalkReturnsErrNotInBoard(t *testing.T) {
 	}
 }
 
+func TestOpenAtRejectsNonFocusDir(t *testing.T) {
+	root := t.TempDir()
+	if _, err := OpenAt(root); err == nil {
+		t.Fatal("OpenAt accepted a non-.focus directory")
+	}
+}
+
 func TestOpenAtReturnsBoard(t *testing.T) {
 	root := t.TempDir()
 	if _, err := Init(root); err != nil {

@@ -146,3 +146,38 @@ func TestFocusDirInitTargetsFlagPath(t *testing.T) {
 		t.Errorf("init did not create .focus at flag path: %v", err)
 	}
 }
+
+func TestFocusDirInitDoesNotNestWhenPathEndsInFocusDir(t *testing.T) {
+	cwd := t.TempDir()
+	target := t.TempDir()
+	focusDir := filepath.Join(target, ".focus")
+	if code, _, errb := runArgs(t, cwd, nil, "--focus-dir", focusDir, "init"); code != 0 {
+		t.Fatalf("init: code=%d errb=%s", code, errb)
+	}
+	if _, err := os.Stat(filepath.Join(target, ".focus", "config.yaml")); err != nil {
+		t.Errorf("init did not create .focus at the parent of the supplied .focus path: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(target, ".focus", ".focus")); err == nil {
+		t.Errorf("init created nested .focus/.focus when given a path ending in .focus")
+	}
+}
+
+func TestExtractFocusDirHonorsDoubleDashTerminator(t *testing.T) {
+	focusDirFlag = ""
+	got, err := extractFocusDir([]string{"new", "--", "--focus-dir", "literal"})
+	if err != nil {
+		t.Fatalf("extractFocusDir: %v", err)
+	}
+	want := []string{"new", "--", "--focus-dir", "literal"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	if focusDirFlag != "" {
+		t.Errorf("focusDirFlag set after --: %q", focusDirFlag)
+	}
+}

@@ -130,6 +130,10 @@ func extractFocusDir(args []string) ([]string, error) {
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		a := args[i]
+		if a == "--" {
+			out = append(out, args[i:]...)
+			return out, nil
+		}
 		switch {
 		case a == "--focus-dir" || a == "-focus-dir":
 			if i+1 >= len(args) {

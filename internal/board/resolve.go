@@ -71,7 +71,11 @@ func resolveExplicit(path string) (string, error) {
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
-	if info, err := os.Stat(abs); err == nil && info.IsDir() && filepath.Base(abs) == FocusDirName {
+	info, err := os.Stat(abs)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	if err == nil && info.IsDir() && filepath.Base(abs) == FocusDirName {
 		return abs, nil
 	}
 	return "", &FocusDirNotFoundError{Path: path}
@@ -91,6 +95,9 @@ func OpenAt(focusDir string) (*Board, error) {
 	}
 	if !info.IsDir() {
 		return nil, fmt.Errorf("%s is not a directory", abs)
+	}
+	if filepath.Base(abs) != FocusDirName {
+		return nil, fmt.Errorf("%s is not a %s directory", abs, FocusDirName)
 	}
 	return &Board{Root: filepath.Dir(abs), Dir: abs}, nil
 }

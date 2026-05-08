@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/evanstern/focus/internal/board"
 )
@@ -33,6 +34,9 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "focus: %v\n", err)
 			return 1
 		}
+	}
+	if filepath.Base(path) == board.FocusDirName {
+		path = filepath.Dir(path)
 	}
 
 	b, err := board.Init(path)
