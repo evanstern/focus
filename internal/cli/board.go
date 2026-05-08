@@ -29,6 +29,6 @@ func runBoard(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "focus: %v\n", err)
 		return 1
 	}
-	printBoard(stdout, v, cfg.EffectiveWIPLimit(), detectTermWidth(), *noTruncate)
+	printBoard(stdout, v, cfg.EffectiveWIPLimit(), detectTermWidth(stdout), *noTruncate)
 	return 0
 }

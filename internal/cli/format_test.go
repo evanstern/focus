@@ -106,6 +106,45 @@ func TestFormatRowWidth_ZeroWidthFallsBackToLegacy(t *testing.T) {
 	}
 }
 
+func TestFormatRowWidth_LongProjectDoesNotShiftColumns(t *testing.T) {
+	short := makeEntry(1, "title")
+	short.Project = "demo"
+	long := makeEntry(2, "title")
+	long.Project = "very-long-project-name"
+
+	rowShort := formatRowWidth(short, 100, false)
+	rowLong := formatRowWidth(long, 100, false)
+
+	colShort := runeIndex(rowShort, "p2")
+	colLong := runeIndex(rowLong, "p2")
+	if colShort != colLong {
+		t.Errorf("PRIORITY column shifts when project overflows %d runes: short=%d, long=%d\n  %q\n  %q",
+			rowProjectWidth, colShort, colLong, rowShort, rowLong)
+	}
+
+	if !strings.ContainsRune(rowLong, '…') {
+		t.Errorf("long project should be visibly truncated, got %q", rowLong)
+	}
+}
+
+// runeIndex is like strings.Index but returns the rune offset of
+// substr in s, not the byte offset. Returns -1 if not found.
+func runeIndex(s, substr string) int {
+	b := strings.Index(s, substr)
+	if b < 0 {
+		return -1
+	}
+	return utf8.RuneCountInString(s[:b])
+}
+
+func TestDetectTermWidth_NonFileWriterFallsBack(t *testing.T) {
+	var buf bytes.Buffer
+	got := detectTermWidth(&buf)
+	if got != defaultTermWidth {
+		t.Errorf("buffer writer should fall back to %d, got %d", defaultTermWidth, got)
+	}
+}
+
 func TestFormatRowWidth_OwnerDoesNotAffectColumnAlignment(t *testing.T) {
 	short := makeEntry(1, "title")
 	short.Owner = "-"
@@ -115,17 +154,17 @@ func TestFormatRowWidth_OwnerDoesNotAffectColumnAlignment(t *testing.T) {
 	rowShort := formatRowWidth(short, 100, false)
 	rowLong := formatRowWidth(long, 100, false)
 
-	idxShort := strings.Index(rowShort, "demo")
-	idxLong := strings.Index(rowLong, "demo")
-	if idxShort != idxLong {
+	colShort := runeIndex(rowShort, "demo")
+	colLong := runeIndex(rowLong, "demo")
+	if colShort != colLong {
 		t.Errorf("PROJECT column shifts with owner length: short owner col=%d, long owner col=%d\n  %q\n  %q",
-			idxShort, idxLong, rowShort, rowLong)
+			colShort, colLong, rowShort, rowLong)
 	}
 
-	idxShortP := strings.Index(rowShort, "p2")
-	idxLongP := strings.Index(rowLong, "p2")
-	if idxShortP != idxLongP {
-		t.Errorf("PRIORITY column shifts with owner length: short=%d, long=%d", idxShortP, idxLongP)
+	pShort := runeIndex(rowShort, "p2")
+	pLong := runeIndex(rowLong, "p2")
+	if pShort != pLong {
+		t.Errorf("PRIORITY column shifts with owner length: short=%d, long=%d", pShort, pLong)
 	}
 }
 

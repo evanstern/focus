@@ -43,28 +43,40 @@ const (
 	defaultTermWidth = 80
 )
 
-// detectTermWidth returns the width of the controlling terminal in
-// columns. It tries stdout first, then stderr (whichever is a tty).
-// Falls back to defaultTermWidth on any error, non-tty, or pipe.
-//
-// Encapsulating the call here lets tests bypass it by calling
-// formatRowWidth directly with a fixed width.
-func detectTermWidth() int {
-	for _, f := range []*os.File{os.Stdout, os.Stderr} {
-		if f == nil {
-			continue
+// detectTermWidth returns the width of the terminal that w points
+// at, in columns. If w is the actual stdout/stderr stream (an
+// *os.File on a tty), it queries that fd directly. Anything else —
+// buffers in tests, redirected pipes, embeddings — falls back to
+// defaultTermWidth. Stderr is consulted as a secondary tty source so
+// that piped stdout (the common scripting case) still reports the
+// real terminal width when stderr is open.
+func detectTermWidth(w io.Writer) int {
+	if f, ok := w.(*os.File); ok {
+		if width, ok := ttyWidth(f); ok {
+			return width
 		}
-		fd := f.Fd()
-		if !term.IsTerminal(fd) {
-			continue
-		}
-		w, _, err := term.GetSize(fd)
-		if err != nil || w <= 0 {
-			continue
-		}
-		return w
+	}
+	if width, ok := ttyWidth(os.Stderr); ok {
+		return width
 	}
 	return defaultTermWidth
+}
+
+// ttyWidth queries f for its terminal size. Returns (width, true) if
+// f is a tty with a usable width, (0, false) otherwise.
+func ttyWidth(f *os.File) (int, bool) {
+	if f == nil {
+		return 0, false
+	}
+	fd := f.Fd()
+	if !term.IsTerminal(fd) {
+		return 0, false
+	}
+	w, _, err := term.GetSize(fd)
+	if err != nil || w <= 0 {
+		return 0, false
+	}
+	return w, true
 }
 
 // printBoard renders the default board view (active + backlog +
@@ -103,13 +115,6 @@ func printBoard(w io.Writer, v *board.BoardView, wipLimit int, termWidth int, no
 	}
 }
 
-// formatRow renders a single index Entry as one terminal line using
-// the auto-detected terminal width. Thin wrapper preserved for
-// callers that don't thread a width through.
-func formatRow(e index.Entry) string {
-	return formatRowWidth(e, detectTermWidth(), false)
-}
-
 // formatRowWidth renders one row at a target terminal width. If
 // noTruncate is true (or width == 0), the title is not truncated and
 // columns may drift on long titles — caller's choice, e.g. for
@@ -131,12 +136,19 @@ func formatRowWidth(e index.Entry, width int, noTruncate bool) string {
 		owner = "-"
 	}
 
+	// Project is rune-padded to rowProjectWidth before the Sprintf so
+	// the column has fixed rune width regardless of multi-byte input.
+	// %-10s pads by byte count, which would let an ellipsis-truncated
+	// project (10 runes / 12 bytes) push PRIORITY/OWNER right and
+	// break rowFixedCols' contract.
+	project := padRunes(truncateRunes(e.Project, rowProjectWidth), rowProjectWidth)
+
 	if noTruncate || width == 0 {
 		// Legacy behavior: %-40s pads short titles, never truncates
 		// long ones. Columns drift on long titles. Documented for
 		// scripting / piping use.
-		return fmt.Sprintf("#%s  %-40s  %-10s  %-4s  %s",
-			card.PaddedID(e.ID), e.Title, e.Project, string(e.Priority), owner,
+		return fmt.Sprintf("#%s  %-40s  %s  %-4s  %s",
+			card.PaddedID(e.ID), e.Title, project, string(e.Priority), owner,
 		)
 	}
 
@@ -150,13 +162,21 @@ func formatRowWidth(e index.Entry, width int, noTruncate bool) string {
 		budget = minTitleBudget
 	}
 
-	title := truncateRunes(e.Title, budget)
-	// Pad the title to the budget so columns line up across rows.
-	padded := title + strings.Repeat(" ", budget-utf8.RuneCountInString(title))
+	title := padRunes(truncateRunes(e.Title, budget), budget)
 
-	return fmt.Sprintf("#%s  %s  %-10s  %-4s  %s",
-		card.PaddedID(e.ID), padded, e.Project, string(e.Priority), owner,
+	return fmt.Sprintf("#%s  %s  %s  %-4s  %s",
+		card.PaddedID(e.ID), title, project, string(e.Priority), owner,
 	)
+}
+
+// padRunes right-pads s with spaces so its rune count is exactly
+// width. If s is already wider, it's returned unchanged.
+func padRunes(s string, width int) string {
+	n := utf8.RuneCountInString(s)
+	if n >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-n)
 }
 
 // truncateRunes returns s truncated to at most max runes, replacing

@@ -52,6 +52,6 @@ func runList(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "focus: %v\n", err)
 		return 1
 	}
-	printList(stdout, entries, detectTermWidth(), *noTruncate)
+	printList(stdout, entries, detectTermWidth(stdout), *noTruncate)
 	return 0
 }

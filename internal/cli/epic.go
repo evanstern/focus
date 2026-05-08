@@ -73,7 +73,7 @@ func runEpicList(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "focus: %v\n", err)
 		return 1
 	}
-	printEpicList(stdout, eps, detectTermWidth(), *noTruncate)
+	printEpicList(stdout, eps, detectTermWidth(stdout), *noTruncate)
 	return 0
 }
 
