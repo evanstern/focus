@@ -62,11 +62,11 @@ func runCompleteIDs(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	cwd, err := os.Getwd()
+	dir, err := board.Resolve(focusDirFlag, os.Getenv("FOCUS_DIR"))
 	if err != nil {
 		return 0
 	}
-	b, err := board.Open(cwd)
+	b, err := board.OpenAt(dir)
 	if err != nil {
 		return 0
 	}
