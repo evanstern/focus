@@ -3,23 +3,101 @@ package cli
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/evanstern/focus/internal/board"
 	"github.com/evanstern/focus/internal/board/card"
 	"github.com/evanstern/focus/internal/board/index"
 )
 
+// Row layout constants for the columnar list/board format. Used to
+// compute how many columns are left for the title.
+//
+//	#XXXX  TITLE  PROJECT(10)  PRIORITY(4)  OWNER
+//	 4  2     2    10        2     4       2  …
+//
+// The id column is always 4 runes (PaddedID), project is %-10s, and
+// priority is %-4s. Owner is variable but appended last so it can
+// drift without disturbing the columns to its left.
+const (
+	rowIDWidth       = 4  // PaddedID width
+	rowProjectWidth  = 10 // %-10s
+	rowPriorityWidth = 4  // %-4s
+	rowSeparator     = 2  // "  " between every column
+
+	// Fixed cost in runes for everything in formatRow except the
+	// title and the trailing owner: `#` + id + sep + sep + project
+	// + sep + priority + sep = 1 + 4 + 2 + 2 + 10 + 2 + 4 + 2 = 27.
+	rowFixedCols = 1 + rowIDWidth + rowSeparator + rowSeparator +
+		rowProjectWidth + rowSeparator + rowPriorityWidth + rowSeparator
+
+	// Minimum runes we'll allocate to a title even on absurdly narrow
+	// terminals. Below this we accept the wrap.
+	minTitleBudget = 20
+
+	// Default fallback width when stdout/stderr aren't a tty or the
+	// detection call errors. 80 is the universal terminal contract.
+	defaultTermWidth = 80
+)
+
+// detectTermWidth returns the width of the terminal that w points
+// at, in columns. If w is an *os.File, it queries that fd directly;
+// if w is a file but not a tty (redirected stdout in a script), it
+// falls back to os.Stderr so piped-stdout-but-tty-stderr — the
+// common scripting case — still reports the real terminal width.
+//
+// For non-file writers (buffers in tests, network sinks, embeddings)
+// detection short-circuits to defaultTermWidth without consulting
+// any global stream. That keeps test behavior independent of whether
+// the developer's shell happens to have a tty on os.Stderr.
+func detectTermWidth(w io.Writer) int {
+	f, ok := w.(*os.File)
+	if !ok {
+		return defaultTermWidth
+	}
+	if width, ok := ttyWidth(f); ok {
+		return width
+	}
+	if width, ok := ttyWidth(os.Stderr); ok {
+		return width
+	}
+	return defaultTermWidth
+}
+
+// ttyWidth queries f for its terminal size. Returns (width, true) if
+// f is a tty with a usable width, (0, false) otherwise.
+func ttyWidth(f *os.File) (int, bool) {
+	if f == nil {
+		return 0, false
+	}
+	fd := f.Fd()
+	if !term.IsTerminal(fd) {
+		return 0, false
+	}
+	w, _, err := term.GetSize(fd)
+	if err != nil || w <= 0 {
+		return 0, false
+	}
+	return w, true
+}
+
 // printBoard renders the default board view (active + backlog +
 // epics) in the columnar format the design doc sketches. No color in
 // v0.1.0; styling lives in the TUI.
-func printBoard(w io.Writer, v *board.BoardView, wipLimit int) {
+func printBoard(w io.Writer, v *board.BoardView, wipLimit int, termWidth int, noTruncate bool) {
+	// Board rows are indented two spaces; subtract that from the
+	// width budget so the title column lines up with the rest.
+	rowWidth := termWidth - 2
+
 	fmt.Fprintf(w, "ACTIVE (%d/%d)\n", len(v.Active), wipLimit)
 	if len(v.Active) == 0 {
 		fmt.Fprintln(w, "  (none)")
 	} else {
 		for _, e := range v.Active {
-			fmt.Fprintln(w, "  "+formatRow(e))
+			fmt.Fprintln(w, "  "+formatRowWidth(e, rowWidth, noTruncate))
 		}
 	}
 
@@ -29,7 +107,7 @@ func printBoard(w io.Writer, v *board.BoardView, wipLimit int) {
 		fmt.Fprintln(w, "  (none)")
 	} else {
 		for _, e := range v.Backlog {
-			fmt.Fprintln(w, "  "+formatRow(e))
+			fmt.Fprintln(w, "  "+formatRowWidth(e, rowWidth, noTruncate))
 		}
 	}
 
@@ -37,37 +115,112 @@ func printBoard(w io.Writer, v *board.BoardView, wipLimit int) {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "EPICS")
 		for _, e := range v.Epics {
-			fmt.Fprintln(w, "  "+formatRow(e))
+			fmt.Fprintln(w, "  "+formatRowWidth(e, rowWidth, noTruncate))
 		}
 	}
 }
 
-// formatRow renders a single index Entry as one terminal line. Format:
+// formatRowWidth renders one row at a target terminal width. If
+// noTruncate is true (or width == 0), the title is not truncated and
+// columns may drift on long titles — caller's choice, e.g. for
+// piping. Otherwise the title is truncated to fit the remaining
+// budget after fixed columns, with a single-rune `…` (U+2026)
+// marker. Truncation works on runes, not bytes, so non-ASCII titles
+// (emoji, accents) cut at character boundaries.
 //
-//	#0142  Ship the feature                    api      p2     ash
+// Negative widths (callers subtracting a prefix from a small detected
+// width) flow into the truncation path and get floored at
+// minTitleBudget — they don't disable truncation.
 //
-// Columns are space-padded for casual reading. We don't wrap or
-// truncate — terminals reflow on their own and truncating titles
-// silently is hostile.
-func formatRow(e index.Entry) string {
+// Silent truncation is hostile, but `…` is loud: the user can see
+// the row was clipped and ask for `--no-truncate` if they want the
+// full title.
+func formatRowWidth(e index.Entry, width int, noTruncate bool) string {
 	owner := e.Owner
 	if owner == "" {
 		owner = "-"
 	}
-	return fmt.Sprintf("#%s  %-40s  %-10s  %-4s  %s",
-		card.PaddedID(e.ID), e.Title, e.Project, string(e.Priority), owner,
+
+	// Project is rune-padded to rowProjectWidth before the Sprintf so
+	// the column has fixed rune width regardless of multi-byte input.
+	// %-10s pads by byte count, which would let an ellipsis-truncated
+	// project (10 runes / 12 bytes) push PRIORITY/OWNER right and
+	// break rowFixedCols' contract.
+	project := padRunes(truncateRunes(e.Project, rowProjectWidth), rowProjectWidth)
+
+	if noTruncate || width == 0 {
+		// Legacy behavior: %-40s pads short titles, never truncates
+		// long ones. Columns drift on long titles. Documented for
+		// scripting / piping use.
+		return fmt.Sprintf("#%s  %-40s  %s  %-4s  %s",
+			card.PaddedID(e.ID), e.Title, project, string(e.Priority), owner,
+		)
+	}
+
+	// Compute the title budget from the fixed columns only. Owner is
+	// trailing and variable; letting it factor into the budget would
+	// shrink the title column for rows with longer owners and shift
+	// PROJECT/PRIORITY left, breaking alignment across rows. Owner is
+	// allowed to drift past the right edge instead.
+	budget := width - rowFixedCols
+	if budget < minTitleBudget {
+		budget = minTitleBudget
+	}
+
+	title := padRunes(truncateRunes(e.Title, budget), budget)
+
+	return fmt.Sprintf("#%s  %s  %s  %-4s  %s",
+		card.PaddedID(e.ID), title, project, string(e.Priority), owner,
 	)
 }
 
+// padRunes right-pads s with spaces so its rune count is exactly
+// width. If s is already wider, it's returned unchanged.
+func padRunes(s string, width int) string {
+	n := utf8.RuneCountInString(s)
+	if n >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-n)
+}
+
+// truncateRunes returns s truncated to at most max runes, replacing
+// the trailing rune with `…` (U+2026) if truncation occurred. If s
+// already fits, it's returned unchanged. max < 1 returns "".
+func truncateRunes(s string, max int) string {
+	if max < 1 {
+		return ""
+	}
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	// Take the first max-1 runes, then append the ellipsis. We walk
+	// the string by rune (range over string) rather than slicing by
+	// byte so multi-byte characters cut cleanly.
+	var b strings.Builder
+	count := 0
+	for _, r := range s {
+		if count >= max-1 {
+			break
+		}
+		b.WriteRune(r)
+		count++
+	}
+	b.WriteRune('…')
+	return b.String()
+}
+
 // printList renders a flat list of entries (one per line) for `focus
-// list`. Same row format as the board.
-func printList(w io.Writer, entries []index.Entry) {
+// list`. Same row format as the board, with a leading status column.
+func printList(w io.Writer, entries []index.Entry, termWidth int, noTruncate bool) {
 	if len(entries) == 0 {
 		fmt.Fprintln(w, "(no cards match)")
 		return
 	}
+	// "STATUS    " is 9 + 2 = 11 runes before the row begins.
+	rowWidth := termWidth - 11
 	for _, e := range entries {
-		fmt.Fprintf(w, "%-9s  %s\n", string(e.Status), formatRow(e))
+		fmt.Fprintf(w, "%-9s  %s\n", string(e.Status), formatRowWidth(e, rowWidth, noTruncate))
 	}
 }
 
@@ -130,15 +283,34 @@ func printEpic(w io.Writer, p *board.EpicProgress) {
 }
 
 // printEpicList renders a one-line-per-epic summary for `focus epic
-// list`.
-func printEpicList(w io.Writer, eps []board.EpicProgress) {
+// list`. Layout: `#XXXX  TITLE  N/M done`. We truncate the title the
+// same way as formatRowWidth.
+func printEpicList(w io.Writer, eps []board.EpicProgress, termWidth int, noTruncate bool) {
 	if len(eps) == 0 {
 		fmt.Fprintln(w, "(no epics)")
 		return
 	}
 	for _, p := range eps {
 		total := p.Total()
-		fmt.Fprintf(w, "#%s  %-40s  %d/%d done\n",
-			card.PaddedID(p.Epic.ID), p.Epic.Title, p.Done, total)
+		progress := fmt.Sprintf("%d/%d done", p.Done, total)
+
+		if noTruncate || termWidth == 0 {
+			fmt.Fprintf(w, "#%s  %-40s  %s\n",
+				card.PaddedID(p.Epic.ID), p.Epic.Title, progress)
+			continue
+		}
+
+		// Fixed cost in runes: `#` + id(4) + sep + sep + progress.
+		// Trailing newline is appended by the Fprintf format string.
+		fixed := 1 + rowIDWidth + rowSeparator + rowSeparator +
+			utf8.RuneCountInString(progress)
+		budget := termWidth - fixed
+		if budget < minTitleBudget {
+			budget = minTitleBudget
+		}
+		title := padRunes(truncateRunes(p.Epic.Title, budget), budget)
+
+		fmt.Fprintf(w, "#%s  %s  %s\n",
+			card.PaddedID(p.Epic.ID), title, progress)
 	}
 }
