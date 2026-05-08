@@ -44,17 +44,22 @@ const (
 )
 
 // detectTermWidth returns the width of the terminal that w points
-// at, in columns. If w is the actual stdout/stderr stream (an
-// *os.File on a tty), it queries that fd directly. Anything else —
-// buffers in tests, redirected pipes, embeddings — falls back to
-// defaultTermWidth. Stderr is consulted as a secondary tty source so
-// that piped stdout (the common scripting case) still reports the
-// real terminal width when stderr is open.
+// at, in columns. If w is an *os.File, it queries that fd directly;
+// if w is a file but not a tty (redirected stdout in a script), it
+// falls back to os.Stderr so piped-stdout-but-tty-stderr — the
+// common scripting case — still reports the real terminal width.
+//
+// For non-file writers (buffers in tests, network sinks, embeddings)
+// detection short-circuits to defaultTermWidth without consulting
+// any global stream. That keeps test behavior independent of whether
+// the developer's shell happens to have a tty on os.Stderr.
 func detectTermWidth(w io.Writer) int {
-	if f, ok := w.(*os.File); ok {
-		if width, ok := ttyWidth(f); ok {
-			return width
-		}
+	f, ok := w.(*os.File)
+	if !ok {
+		return defaultTermWidth
+	}
+	if width, ok := ttyWidth(f); ok {
+		return width
 	}
 	if width, ok := ttyWidth(os.Stderr); ok {
 		return width
@@ -303,10 +308,9 @@ func printEpicList(w io.Writer, eps []board.EpicProgress, termWidth int, noTrunc
 		if budget < minTitleBudget {
 			budget = minTitleBudget
 		}
-		title := truncateRunes(p.Epic.Title, budget)
-		padded := title + strings.Repeat(" ", budget-utf8.RuneCountInString(title))
+		title := padRunes(truncateRunes(p.Epic.Title, budget), budget)
 
 		fmt.Fprintf(w, "#%s  %s  %s\n",
-			card.PaddedID(p.Epic.ID), padded, progress)
+			card.PaddedID(p.Epic.ID), title, progress)
 	}
 }
