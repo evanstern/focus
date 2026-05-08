@@ -316,6 +316,188 @@ func TestCommandModeNewWithQuotedTitle(t *testing.T) {
 	}
 }
 
+func TestReloadKeyRereadsBoardAndPreservesCursorByUUID(t *testing.T) {
+	b := setupBoard(t)
+	m, err := newModel(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := b.Board()
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, _ := m.Update(reloadedMsg{view: v})
+	m = updated.(*Model)
+
+	updated, _ = m.Update(runeKey('j'))
+	m = updated.(*Model)
+	selected := m.board_.selectedCard()
+	if selected == nil {
+		t.Fatal("no card under cursor")
+	}
+	keepUUID := selected.UUID
+	keepID := selected.ID
+	if keepUUID == "" {
+		t.Fatalf("selected card has empty UUID: %+v", selected)
+	}
+
+	if _, _, err := b.NewCard("delta", board.NewCardOpts{}); err != nil {
+		t.Fatalf("NewCard delta: %v", err)
+	}
+	v2, _ := b.Board()
+	var killID int
+	for _, e := range v2.Backlog {
+		if e.ID != keepID {
+			killID = e.ID
+			break
+		}
+	}
+	if killID == 0 {
+		t.Fatal("could not find a card to kill")
+	}
+	if _, err := b.Kill(killID, false); err != nil {
+		t.Fatalf("Kill %d: %v", killID, err)
+	}
+
+	updated, cmd := m.Update(runeKey('r'))
+	m = updated.(*Model)
+	if cmd == nil {
+		t.Fatal("r produced no reload command")
+	}
+	msg := cmd()
+	rmsg, ok := msg.(reloadedMsg)
+	if !ok {
+		t.Fatalf("reload returned %T, want reloadedMsg", msg)
+	}
+	if rmsg.preserveUUID != keepUUID {
+		t.Errorf("reloadedMsg.preserveUUID = %q, want %q", rmsg.preserveUUID, keepUUID)
+	}
+
+	updated, _ = m.Update(rmsg)
+	m = updated.(*Model)
+
+	got := m.board_.selectedCard()
+	if got == nil {
+		t.Fatal("no card under cursor after reload")
+	}
+	if got.UUID != keepUUID {
+		t.Errorf("cursor after reload UUID = %q, want %q (id got=%d keep=%d)",
+			got.UUID, keepUUID, got.ID, keepID)
+	}
+
+	cards := 0
+	for _, r := range m.board_.rows {
+		if r.isCard() {
+			cards++
+		}
+	}
+	if cards != 3 {
+		t.Errorf("after reload, visible cards = %d, want 3", cards)
+	}
+	titles := map[string]bool{}
+	for _, r := range m.board_.rows {
+		if r.isCard() {
+			titles[r.entry.Title] = true
+		}
+	}
+	if !titles["delta"] {
+		t.Errorf("reload didn't pick up new card 'delta'; visible titles=%v", titles)
+	}
+}
+
+func TestReloadFallsBackToTopWhenSelectedCardArchived(t *testing.T) {
+	b := setupBoard(t)
+	m, _ := newModel(b)
+	v, _ := b.Board()
+	updated, _ := m.Update(reloadedMsg{view: v})
+	m = updated.(*Model)
+
+	selected := m.board_.selectedCard()
+	if selected == nil {
+		t.Fatal("no card under cursor")
+	}
+	if _, err := b.Kill(selected.ID, false); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+
+	updated, cmd := m.Update(runeKey('r'))
+	m = updated.(*Model)
+	rmsg := cmd().(reloadedMsg)
+	updated, _ = m.Update(rmsg)
+	m = updated.(*Model)
+
+	got := m.board_.selectedCard()
+	if got == nil {
+		t.Fatal("no card under cursor after reload (board still has 2 cards)")
+	}
+	if got.UUID == selected.UUID {
+		t.Errorf("cursor still on archived card UUID=%q", got.UUID)
+	}
+}
+
+func TestReloadPreservesActiveFilter(t *testing.T) {
+	b := setupBoard(t)
+	m, _ := newModel(b)
+	v, _ := b.Board()
+	updated, _ := m.Update(reloadedMsg{view: v})
+	m = updated.(*Model)
+
+	updated, cmd := m.Update(runeKey('l'))
+	m = updated.(*Model)
+	if cmd != nil {
+		if msg := cmd(); msg != nil {
+			updated, _ = m.Update(msg)
+			m = updated.(*Model)
+		}
+	}
+	wantFilter := m.board_.filter
+	if wantFilter == filterInFlight {
+		t.Fatal("filter didn't advance off filterInFlight after `l`")
+	}
+
+	updated, cmd = m.Update(runeKey('r'))
+	m = updated.(*Model)
+	if cmd == nil {
+		t.Fatal("r produced no reload command")
+	}
+	rmsg := cmd().(reloadedMsg)
+	if rmsg.filter != wantFilter {
+		t.Errorf("reload filter = %v, want %v", rmsg.filter, wantFilter)
+	}
+	updated, _ = m.Update(rmsg)
+	m = updated.(*Model)
+	if m.board_.filter != wantFilter {
+		t.Errorf("filter after reload = %v, want %v", m.board_.filter, wantFilter)
+	}
+}
+
+func TestReloadInsideSearchModeIsTextInputNotReload(t *testing.T) {
+	b := setupBoard(t)
+	m, _ := newModel(b)
+	v, _ := b.Board()
+	updated, _ := m.Update(reloadedMsg{view: v})
+	m = updated.(*Model)
+
+	updated, _ = m.Update(runeKey('/'))
+	m = updated.(*Model)
+	if m.input != modeSearch {
+		t.Fatalf("input = %v, want search", m.input)
+	}
+
+	updated, cmd := m.Update(runeKey('r'))
+	m = updated.(*Model)
+	if got := m.search.Value(); got != "r" {
+		t.Errorf("search buffer after `r` in search mode = %q, want %q", got, "r")
+	}
+	if cmd != nil {
+		if msg := cmd(); msg != nil {
+			if _, ok := msg.(reloadedMsg); ok {
+				t.Error("`r` inside search mode produced a reloadedMsg; should be modal text input")
+			}
+		}
+	}
+}
+
 func TestSearchAcceptsPasteMsg(t *testing.T) {
 	b := setupBoard(t)
 	m, _ := newModel(b)

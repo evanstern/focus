@@ -91,6 +91,10 @@ func newBoardModel(b *board.Board) (boardModel, error) {
 // preserveID: if non-zero, attempts to put the cursor on the row
 // matching this card id after reload. Falls back to row 0 if the
 // id isn't present (filter changed, card archived, etc).
+//
+// If msg.preserveUUID is set, it takes precedence over preserveID:
+// reload by UUID is the path the manual `r` reload uses so external
+// renumbering/reindexing doesn't lose the user's selection.
 func (m *boardModel) applyReload(msg reloadedMsg, preserveID int) {
 	m.filter = msg.filter
 	m.allRows = m.allRows[:0]
@@ -122,6 +126,10 @@ func (m *boardModel) applyReload(msg reloadedMsg, preserveID int) {
 		}
 	}
 	m.rows = m.allRows
+	if msg.preserveUUID != "" {
+		m.placeCursorByUUID(msg.preserveUUID)
+		return
+	}
 	m.placeCursor(preserveID)
 }
 
@@ -188,6 +196,21 @@ func (m *boardModel) placeCursor(preserveID int) {
 	if preserveID > 0 {
 		for i, r := range m.rows {
 			if r.isCard() && r.entry.ID == preserveID {
+				m.cursor = i
+				return
+			}
+		}
+	}
+	m.placeCursorAtFirstCard()
+}
+
+// placeCursorByUUID puts the cursor on the row whose entry UUID
+// matches preserveUUID. Falls back to the first card if the UUID
+// isn't present (card archived/killed externally between reloads).
+func (m *boardModel) placeCursorByUUID(preserveUUID string) {
+	if preserveUUID != "" {
+		for i, r := range m.rows {
+			if r.isCard() && r.entry.UUID == preserveUUID {
 				m.cursor = i
 				return
 			}
@@ -425,11 +448,16 @@ func (m *boardModel) scrollWindow(height int) (int, int) {
 // after applyReload. Producers set this to whatever card the user
 // was looking at (or just edited) so reload doesn't snap the cursor
 // back to the top.
+//
+// preserveUUID, if set, takes precedence over preserveID. Used by
+// the manual reload path so external renumbering doesn't drop the
+// cursor when card ids shift.
 type reloadedMsg struct {
-	filter     filterMode
-	view       *board.BoardView
-	entries    []index.Entry
-	preserveID int
+	filter       filterMode
+	view         *board.BoardView
+	entries      []index.Entry
+	preserveID   int
+	preserveUUID string
 }
 
 // statusMsg sets the bottom-bar ephemeral status (e.g. "card #7
@@ -444,26 +472,39 @@ type statusMsg string
 // List() with a status filter.
 func reloadCmd(b *board.Board, f filterMode, preserveID int) tea.Cmd {
 	return func() tea.Msg {
-		switch f {
-		case filterInFlight:
-			v, err := b.Board()
-			if err != nil {
-				return statusMsg("reload error: " + err.Error())
-			}
-			return reloadedMsg{filter: f, view: v, preserveID: preserveID}
-		default:
-			opts := board.ListOpts{}
-			switch f {
-			case filterDone:
-				opts.Status = card.StatusDone
-			case filterArchived:
-				opts.Status = card.StatusArchived
-			}
-			es, err := b.List(opts)
-			if err != nil {
-				return statusMsg("reload error: " + err.Error())
-			}
-			return reloadedMsg{filter: f, entries: es, preserveID: preserveID}
+		return loadBoard(b, f, preserveID, "")
+	}
+}
+
+// reloadByUUIDCmd is the manual-reload variant: cursor preservation
+// is keyed on card UUID rather than id, so external renumbering
+// (e.g., after a reindex) doesn't drop the user's selection.
+func reloadByUUIDCmd(b *board.Board, f filterMode, preserveUUID string) tea.Cmd {
+	return func() tea.Msg {
+		return loadBoard(b, f, 0, preserveUUID)
+	}
+}
+
+func loadBoard(b *board.Board, f filterMode, preserveID int, preserveUUID string) tea.Msg {
+	switch f {
+	case filterInFlight:
+		v, err := b.Board()
+		if err != nil {
+			return statusMsg("reload error: " + err.Error())
 		}
+		return reloadedMsg{filter: f, view: v, preserveID: preserveID, preserveUUID: preserveUUID}
+	default:
+		opts := board.ListOpts{}
+		switch f {
+		case filterDone:
+			opts.Status = card.StatusDone
+		case filterArchived:
+			opts.Status = card.StatusArchived
+		}
+		es, err := b.List(opts)
+		if err != nil {
+			return statusMsg("reload error: " + err.Error())
+		}
+		return reloadedMsg{filter: f, entries: es, preserveID: preserveID, preserveUUID: preserveUUID}
 	}
 }
