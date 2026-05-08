@@ -106,6 +106,29 @@ func TestFormatRowWidth_ZeroWidthFallsBackToLegacy(t *testing.T) {
 	}
 }
 
+func TestFormatRowWidth_OwnerDoesNotAffectColumnAlignment(t *testing.T) {
+	short := makeEntry(1, "title")
+	short.Owner = "-"
+	long := makeEntry(2, "title")
+	long.Owner = "verylongowner"
+
+	rowShort := formatRowWidth(short, 100, false)
+	rowLong := formatRowWidth(long, 100, false)
+
+	idxShort := strings.Index(rowShort, "demo")
+	idxLong := strings.Index(rowLong, "demo")
+	if idxShort != idxLong {
+		t.Errorf("PROJECT column shifts with owner length: short owner col=%d, long owner col=%d\n  %q\n  %q",
+			idxShort, idxLong, rowShort, rowLong)
+	}
+
+	idxShortP := strings.Index(rowShort, "p2")
+	idxLongP := strings.Index(rowLong, "p2")
+	if idxShortP != idxLongP {
+		t.Errorf("PRIORITY column shifts with owner length: short=%d, long=%d", idxShortP, idxLongP)
+	}
+}
+
 func TestFormatRowWidth_NegativeWidthFloorsToMinBudget(t *testing.T) {
 	long := "A very long title that absolutely will not fit anywhere"
 	row := formatRowWidth(makeEntry(1, long), -5, false)

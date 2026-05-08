@@ -140,9 +140,12 @@ func formatRowWidth(e index.Entry, width int, noTruncate bool) string {
 		)
 	}
 
-	// Compute the title budget. The owner column is variable and
-	// trailing, so it's part of the cost on the right side.
-	budget := width - rowFixedCols - utf8.RuneCountInString(owner)
+	// Compute the title budget from the fixed columns only. Owner is
+	// trailing and variable; letting it factor into the budget would
+	// shrink the title column for rows with longer owners and shift
+	// PROJECT/PRIORITY left, breaking alignment across rows. Owner is
+	// allowed to drift past the right edge instead.
+	budget := width - rowFixedCols
 	if budget < minTitleBudget {
 		budget = minTitleBudget
 	}
