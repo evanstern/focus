@@ -36,6 +36,9 @@ type KeyMap struct {
 	// Actions
 	Edit, Activate, Park, Done, Kill, Revive key.Binding
 
+	// Reload (re-read .focus/ from disk and rebuild the model)
+	Reload key.Binding
+
 	// Modes
 	Search, Command, Help, Quit, ForceQuit key.Binding
 
@@ -120,8 +123,12 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("K", "kill (archive)"),
 		),
 		Revive: key.NewBinding(
+			key.WithKeys("R"),
+			key.WithHelp("R", "revive"),
+		),
+		Reload: key.NewBinding(
 			key.WithKeys("r"),
-			key.WithHelp("r", "revive"),
+			key.WithHelp("r", "reload board from disk"),
 		),
 		Search: key.NewBinding(
 			key.WithKeys("/"),
@@ -171,7 +178,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		{k.FocusNext, k.FocusPrev},
 		{k.Up, k.Down, k.Top, k.Bottom, k.JumpDown, k.JumpUp, k.ScrollPgDown, k.ScrollPgUp},
 		{k.Edit, k.Activate, k.Park, k.Done, k.Kill, k.Revive},
-		{k.FilterNext, k.FilterPrev, k.LayoutCycle},
+		{k.FilterNext, k.FilterPrev, k.LayoutCycle, k.Reload},
 		{k.Search, k.Command, k.Help, k.Quit, k.ForceQuit},
 		{k.Cancel, k.Confirm, k.Dismiss},
 	}
@@ -324,6 +331,12 @@ func (m *Model) handleBoardKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.LayoutCycle):
 		m.split = m.split.next()
 		m.status = "layout: " + m.split.label()
+	case key.Matches(msg, m.keys.Reload):
+		preserveUUID := ""
+		if e := m.board_.selectedCard(); e != nil {
+			preserveUUID = e.UUID
+		}
+		return m, reloadByUUIDCmd(m.board, m.board_.filter, preserveUUID)
 	}
 	return m, nil
 }

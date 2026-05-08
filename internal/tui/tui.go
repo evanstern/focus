@@ -332,7 +332,7 @@ func (m *Model) statusContent() string {
 	if m.status != "" {
 		return fmt.Sprintf("%s  %s", mode, m.status)
 	}
-	hint := "tab focus  j/k move/scroll  h/l filter  s layout  e edit  a/p/d/K/r transition  /search  :command  ?help  q quit"
+	hint := "tab focus  j/k move/scroll  h/l filter  s layout  e edit  a/p/d/K/R transition  r reload  /search  :command  ?help  q quit"
 	return fmt.Sprintf("%s  %s", mode, hint)
 }
 
