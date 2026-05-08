@@ -4,7 +4,7 @@ id: 10
 uuid: 019dfa36-8e4a-7b31-aa78-bb6fad62da39
 title: TUI refresh on external changes (auto-watch, manual reload, or both)
 type: card
-status: backlog
+status: archived
 priority: p2
 project: focus
 created: 2026-05-05

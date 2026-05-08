@@ -4,7 +4,7 @@ id: 7
 uuid: 019dfa36-8e1b-7d74-8545-2e01ab85fcde
 title: Specify focus directory via flag and env (CLI + MCP)
 type: card
-status: backlog
+status: archived
 priority: p1
 project: focus
 created: 2026-05-05
