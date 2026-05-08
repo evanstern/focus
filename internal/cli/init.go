@@ -17,12 +17,16 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	path := "."
+	path := ""
 	if fs.NArg() > 0 {
 		path = fs.Arg(0)
+	} else if focusDirFlag != "" {
+		path = focusDirFlag
+	} else if env := os.Getenv("FOCUS_DIR"); env != "" {
+		path = env
 	}
 
-	if path == "." {
+	if path == "" || path == "." {
 		var err error
 		path, err = os.Getwd()
 		if err != nil {

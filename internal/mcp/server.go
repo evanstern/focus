@@ -9,17 +9,35 @@ package mcp
 
 import (
 	"context"
-	"fmt"
 	"os"
+	"sync"
 
 	"github.com/evanstern/focus/internal/board"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// Implementation describes the focus MCP server to clients during
-// the initialize handshake. Surfaces the binary version we were
-// built with so clients can correlate server behavior to the
-// release.
+// serverDefaultFocusDir is the focus dir resolved once at server
+// startup using FOCUS_DIR + the upward walk from the server's CWD.
+// Per-tool `focus_dir` arguments override this. Empty string means
+// "no default available" (resolution failed at startup; the per-tool
+// arg becomes mandatory).
+var (
+	serverDefaultFocusDir   string
+	serverDefaultFocusDirMu sync.RWMutex
+)
+
+func setServerDefaultFocusDir(s string) {
+	serverDefaultFocusDirMu.Lock()
+	defer serverDefaultFocusDirMu.Unlock()
+	serverDefaultFocusDir = s
+}
+
+func getServerDefaultFocusDir() string {
+	serverDefaultFocusDirMu.RLock()
+	defer serverDefaultFocusDirMu.RUnlock()
+	return serverDefaultFocusDir
+}
+
 func newImplementation(version string) *mcpsdk.Implementation {
 	return &mcpsdk.Implementation{
 		Name:    "focus",
@@ -31,23 +49,32 @@ func newImplementation(version string) *mcpsdk.Implementation {
 // or ctx is cancelled. version is stamped into the initialize-time
 // implementation info; the CLI passes its own Version constant in.
 //
-// The .focus/ board is resolved lazily inside each tool handler from
-// $PWD, which matches CLI semantics and means agents see the board
-// for the project they're working in (designs/focus-v2.md §"MCP
-// server").
+// At startup the server resolves a default focus dir using
+// FOCUS_DIR and the upward walk from the server's CWD. Per-tool
+// `focus_dir` arguments override that default.
 func Serve(ctx context.Context, version string) error {
+	if dir, err := board.Resolve("", os.Getenv("FOCUS_DIR")); err == nil {
+		setServerDefaultFocusDir(dir)
+	}
 	srv := mcpsdk.NewServer(newImplementation(version), nil)
 	registerTools(srv)
 	return srv.Run(ctx, &mcpsdk.StdioTransport{})
 }
 
-// resolveBoard is the per-tool entry point: walk for .focus/ from
-// $PWD, surface ErrNotInBoard as a tool-level error so the agent
-// gets a useful message instead of a transport error.
-func resolveBoard() (*board.Board, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, fmt.Errorf("getwd: %w", err)
+// resolveBoardWithArg returns the board to use for a single tool
+// call. The per-tool focus_dir arg, if set, takes precedence over
+// the server default. If neither is set, ErrNotInBoard is returned
+// so the agent gets a useful message.
+func resolveBoardWithArg(focusDirArg string) (*board.Board, error) {
+	if focusDirArg != "" {
+		dir, err := board.Resolve(focusDirArg, "")
+		if err != nil {
+			return nil, err
+		}
+		return board.OpenAt(dir)
 	}
-	return board.Open(cwd)
+	if def := getServerDefaultFocusDir(); def != "" {
+		return board.OpenAt(def)
+	}
+	return nil, board.ErrNotInBoard
 }

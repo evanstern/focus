@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/evanstern/focus/internal/board"
 )
@@ -23,6 +24,11 @@ import (
 // Version is the focus binary version. Stamped at build time via
 // goreleaser; defaults to "dev" for source builds.
 var Version = "dev"
+
+// focusDirFlag holds the value of --focus-dir extracted at dispatch
+// time. Consulted by openBoard. Reset on each Run() entry so tests
+// remain hermetic.
+var focusDirFlag string
 
 // Run executes the focus CLI. It returns the process exit code.
 //
@@ -32,6 +38,12 @@ var Version = "dev"
 //	1 — runtime error (board op failed, file IO, etc.)
 //	2 — usage error (unknown command, missing args, bad flag)
 func Run(args []string, stdout, stderr io.Writer) int {
+	focusDirFlag = ""
+	args, err := extractFocusDir(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "focus: %v\n", err)
+		return 2
+	}
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, helpText)
 		return 2
@@ -85,32 +97,69 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-// openBoard resolves the nearest .focus/ from $PWD. Handlers that
-// need a board call this and bail with exit code 1 if the resolution
-// fails. For ErrNotInBoard we print the friendly error message that
-// the design doc specifies.
+// openBoard resolves the focus board using the three-tier order
+// flag > env > upward walk from $PWD. Handlers call this and bail
+// with exit code 1 if resolution fails.
 func openBoard(stderr io.Writer) (*board.Board, int) {
-	cwd, err := os.Getwd()
+	dir, err := board.Resolve(focusDirFlag, os.Getenv("FOCUS_DIR"))
 	if err != nil {
-		fmt.Fprintf(stderr, "focus: %v\n", err)
-		return nil, 1
-	}
-	b, err := board.Open(cwd)
-	if err != nil {
-		if errors.Is(err, board.ErrNotInBoard) {
+		var fnf *board.FocusDirNotFoundError
+		switch {
+		case errors.Is(err, board.ErrNotInBoard):
 			fmt.Fprintln(stderr, "focus: not in a focus board. run `focus init` to create one here.")
-		} else {
+		case errors.As(err, &fnf):
+			fmt.Fprintln(stderr, fnf.Error())
+		default:
 			fmt.Fprintf(stderr, "focus: %v\n", err)
 		}
+		return nil, 1
+	}
+	b, err := board.OpenAt(dir)
+	if err != nil {
+		fmt.Fprintf(stderr, "focus: %v\n", err)
 		return nil, 1
 	}
 	return b, 0
 }
 
+// extractFocusDir pulls --focus-dir / -focus-dir (with either =VALUE
+// or a separate VALUE token) out of args before subcommand dispatch.
+// This makes the flag work as a "persistent" root flag without
+// requiring every subcommand's flagset to register it.
+func extractFocusDir(args []string) ([]string, error) {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--focus-dir" || a == "-focus-dir":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("flag needs an argument: %s", a)
+			}
+			focusDirFlag = args[i+1]
+			i++
+		case strings.HasPrefix(a, "--focus-dir="):
+			focusDirFlag = strings.TrimPrefix(a, "--focus-dir=")
+		case strings.HasPrefix(a, "-focus-dir="):
+			focusDirFlag = strings.TrimPrefix(a, "-focus-dir=")
+		default:
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
 const helpText = `focus — project-local kanban for developers and agents
 
 USAGE
-  focus <command> [args]
+  focus [--focus-dir <path>] <command> [args]
+
+CONFIGURATION
+  Board location is resolved in this order (first match wins):
+    1. --focus-dir <path>     persistent root flag
+    2. FOCUS_DIR env var
+    3. upward walk from $PWD looking for .focus/
+  <path> may be a project root containing .focus/ or the .focus/
+  directory itself.
 
 BOARD
   init [path]              Create a .focus/ at path (default: $PWD).

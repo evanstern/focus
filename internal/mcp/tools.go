@@ -83,21 +83,23 @@ func registerTools(srv *mcpsdk.Server) {
 	}, toolReindex)
 }
 
-// EmptyArgs is the input type for tools that take no arguments.
-// AddTool requires the In type to render as an object schema, so we
-// use an empty struct — that produces "type":"object" with no
-// properties.
-type EmptyArgs struct{}
+// EmptyArgs is the input type for tools that take no arguments other
+// than the optional focus_dir override.
+type EmptyArgs struct {
+	FocusDir string `json:"focus_dir,omitempty" jsonschema:"optional path to a project root or .focus/ dir; overrides the server default for this call"`
+}
 
 // IDArgs is the input type for tools that accept exactly one id.
 type IDArgs struct {
-	ID int `json:"id" jsonschema:"the card id (board-local integer)"`
+	ID       int    `json:"id" jsonschema:"the card id (board-local integer)"`
+	FocusDir string `json:"focus_dir,omitempty" jsonschema:"optional path to a project root or .focus/ dir; overrides the server default for this call"`
 }
 
 // IDForceArgs adds the force flag for transitions that allow it.
 type IDForceArgs struct {
-	ID    int  `json:"id" jsonschema:"the card id (board-local integer)"`
-	Force bool `json:"force,omitempty" jsonschema:"bypass from-status validation"`
+	ID       int    `json:"id" jsonschema:"the card id (board-local integer)"`
+	Force    bool   `json:"force,omitempty" jsonschema:"bypass from-status validation"`
+	FocusDir string `json:"focus_dir,omitempty" jsonschema:"optional path to a project root or .focus/ dir; overrides the server default for this call"`
 }
 
 // NewArgs is the input type for focus_new. Mirrors NewCardOpts but
@@ -109,19 +111,22 @@ type NewArgs struct {
 	Type     string `json:"type,omitempty" jsonschema:"card or epic; defaults to card"`
 	Epic     int    `json:"epic,omitempty" jsonschema:"parent epic id (omit for none)"`
 	Slug     string `json:"slug,omitempty" jsonschema:"override the auto-derived folder slug"`
+	FocusDir string `json:"focus_dir,omitempty" jsonschema:"optional path to a project root or .focus/ dir; overrides the server default for this call"`
 }
 
 // EditBodyArgs replaces a card's markdown body.
 type EditBodyArgs struct {
-	ID   int    `json:"id"`
-	Body string `json:"body" jsonschema:"new markdown body; replaces the existing body verbatim"`
+	ID       int    `json:"id"`
+	Body     string `json:"body" jsonschema:"new markdown body; replaces the existing body verbatim"`
+	FocusDir string `json:"focus_dir,omitempty" jsonschema:"optional path to a project root or .focus/ dir; overrides the server default for this call"`
 }
 
 // EpicAddArgs links a card to an epic.
 type EpicAddArgs struct {
-	EpicID int  `json:"epic_id"`
-	CardID int  `json:"card_id"`
-	Force  bool `json:"force,omitempty" jsonschema:"skip the epic-id existence check"`
+	EpicID   int    `json:"epic_id"`
+	CardID   int    `json:"card_id"`
+	Force    bool   `json:"force,omitempty" jsonschema:"skip the epic-id existence check"`
+	FocusDir string `json:"focus_dir,omitempty" jsonschema:"optional path to a project root or .focus/ dir; overrides the server default for this call"`
 }
 
 // ListArgs filters a focus_list call. All fields are optional.
@@ -133,6 +138,7 @@ type ListArgs struct {
 	Tag      string `json:"tag,omitempty"`
 	Type     string `json:"type,omitempty"`
 	Epic     int    `json:"epic,omitempty"`
+	FocusDir string `json:"focus_dir,omitempty" jsonschema:"optional path to a project root or .focus/ dir; overrides the server default for this call"`
 }
 
 // CardSummary is the per-card payload shape returned by every list-y
@@ -178,8 +184,8 @@ type BoardResult struct {
 	Epics   []CardSummary `json:"epics"`
 }
 
-func toolBoard(_ context.Context, _ *mcpsdk.CallToolRequest, _ EmptyArgs) (*mcpsdk.CallToolResult, BoardResult, error) {
-	b, err := resolveBoard()
+func toolBoard(_ context.Context, _ *mcpsdk.CallToolRequest, args EmptyArgs) (*mcpsdk.CallToolResult, BoardResult, error) {
+	b, err := resolveBoardWithArg(args.FocusDir)
 	if err != nil {
 		return nil, BoardResult{}, err
 	}
@@ -210,7 +216,7 @@ type ListResult struct {
 }
 
 func toolList(_ context.Context, _ *mcpsdk.CallToolRequest, args ListArgs) (*mcpsdk.CallToolResult, ListResult, error) {
-	b, err := resolveBoard()
+	b, err := resolveBoardWithArg(args.FocusDir)
 	if err != nil {
 		return nil, ListResult{}, err
 	}
@@ -248,7 +254,7 @@ type ShowResult struct {
 }
 
 func toolShow(_ context.Context, _ *mcpsdk.CallToolRequest, args IDArgs) (*mcpsdk.CallToolResult, ShowResult, error) {
-	b, err := resolveBoard()
+	b, err := resolveBoardWithArg(args.FocusDir)
 	if err != nil {
 		return nil, ShowResult{}, err
 	}
@@ -290,7 +296,7 @@ type NewResult struct {
 }
 
 func toolNew(_ context.Context, _ *mcpsdk.CallToolRequest, args NewArgs) (*mcpsdk.CallToolResult, NewResult, error) {
-	b, err := resolveBoard()
+	b, err := resolveBoardWithArg(args.FocusDir)
 	if err != nil {
 		return nil, NewResult{}, err
 	}
@@ -338,7 +344,7 @@ func toolRevive(_ context.Context, _ *mcpsdk.CallToolRequest, args IDForceArgs) 
 }
 
 func doTransition(op func(*board.Board, int, bool) (*card.Card, error), args IDForceArgs) (*mcpsdk.CallToolResult, TransitionResult, error) {
-	b, err := resolveBoard()
+	b, err := resolveBoardWithArg(args.FocusDir)
 	if err != nil {
 		return nil, TransitionResult{}, err
 	}
@@ -350,7 +356,7 @@ func doTransition(op func(*board.Board, int, bool) (*card.Card, error), args IDF
 }
 
 func toolEditBody(_ context.Context, _ *mcpsdk.CallToolRequest, args EditBodyArgs) (*mcpsdk.CallToolResult, TransitionResult, error) {
-	b, err := resolveBoard()
+	b, err := resolveBoardWithArg(args.FocusDir)
 	if err != nil {
 		return nil, TransitionResult{}, err
 	}
@@ -390,8 +396,8 @@ func progressFromBoard(p board.EpicProgress) EpicProgress {
 	}
 }
 
-func toolEpicList(_ context.Context, _ *mcpsdk.CallToolRequest, _ EmptyArgs) (*mcpsdk.CallToolResult, EpicListResult, error) {
-	b, err := resolveBoard()
+func toolEpicList(_ context.Context, _ *mcpsdk.CallToolRequest, args EmptyArgs) (*mcpsdk.CallToolResult, EpicListResult, error) {
+	b, err := resolveBoardWithArg(args.FocusDir)
 	if err != nil {
 		return nil, EpicListResult{}, err
 	}
@@ -407,7 +413,7 @@ func toolEpicList(_ context.Context, _ *mcpsdk.CallToolRequest, _ EmptyArgs) (*m
 }
 
 func toolEpicShow(_ context.Context, _ *mcpsdk.CallToolRequest, args IDArgs) (*mcpsdk.CallToolResult, EpicProgress, error) {
-	b, err := resolveBoard()
+	b, err := resolveBoardWithArg(args.FocusDir)
 	if err != nil {
 		return nil, EpicProgress{}, err
 	}
@@ -425,7 +431,7 @@ type EpicAddResult struct {
 }
 
 func toolEpicAdd(_ context.Context, _ *mcpsdk.CallToolRequest, args EpicAddArgs) (*mcpsdk.CallToolResult, EpicAddResult, error) {
-	b, err := resolveBoard()
+	b, err := resolveBoardWithArg(args.FocusDir)
 	if err != nil {
 		return nil, EpicAddResult{}, err
 	}
@@ -441,8 +447,8 @@ type ReindexResult struct {
 	NextID int `json:"next_id"`
 }
 
-func toolReindex(_ context.Context, _ *mcpsdk.CallToolRequest, _ EmptyArgs) (*mcpsdk.CallToolResult, ReindexResult, error) {
-	b, err := resolveBoard()
+func toolReindex(_ context.Context, _ *mcpsdk.CallToolRequest, args EmptyArgs) (*mcpsdk.CallToolResult, ReindexResult, error) {
+	b, err := resolveBoardWithArg(args.FocusDir)
 	if err != nil {
 		return nil, ReindexResult{}, err
 	}

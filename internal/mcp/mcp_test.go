@@ -29,6 +29,11 @@ func boardCtx(t *testing.T) (*mcpsdk.ClientSession, *mcpsdk.ServerSession, func(
 		t.Fatal(err)
 	}
 
+	if dir, err := board.Resolve("", os.Getenv("FOCUS_DIR")); err == nil {
+		setServerDefaultFocusDir(dir)
+	}
+	t.Cleanup(func() { setServerDefaultFocusDir("") })
+
 	srv := mcpsdk.NewServer(newImplementation("test"), nil)
 	registerTools(srv)
 

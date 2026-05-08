@@ -128,6 +128,36 @@ frontmatter. Cards are referenced by `id` within a board. The `uuid`
 is reserved for future cross-board features but is not yet a lookup
 key in v0.1.0.
 
+## Configuration
+
+`focus` resolves which board to operate on in this order:
+
+1. `--focus-dir <path>` — root flag, available on every subcommand.
+2. `FOCUS_DIR` env var — same effect, useful for shells and CI.
+3. Upward walk from `$PWD` looking for `.focus/`, the way `git`
+   walks for `.git/`.
+
+`<path>` may be either a project root (the directory that
+contains `.focus/`) or the `.focus/` directory itself.
+
+```bash
+# operate on a board you're not currently inside
+focus --focus-dir ~/projects/myapp board
+
+# pin a shell to a specific board
+export FOCUS_DIR=~/projects/myapp
+focus list
+```
+
+If the supplied path doesn't resolve to a `.focus/`, focus exits
+with `focus: no .focus/ found at <path>`.
+
+The MCP server uses the same chain at startup to pick its default
+board (env + upward walk from the server's CWD). Each MCP tool
+also accepts an optional `focus_dir` argument that overrides the
+default for a single call — handy when one long-running server is
+juggling multiple boards.
+
 ## Architecture overview
 
 ```
