@@ -22,6 +22,7 @@ func runList(args []string, stdout, stderr io.Writer) int {
 	tag := fs.String("tag", "", "filter by tag")
 	cardType := fs.String("type", "", "filter by type (card|epic)")
 	epicID := fs.Int("epic", 0, "filter by epic id (0 = no filter)")
+	noTruncate := fs.Bool("no-truncate", false, "do not truncate titles to terminal width (for piping/scripting)")
 
 	if err := fs.Parse(reorderFlags(args)); err != nil {
 		return 2
@@ -51,6 +52,6 @@ func runList(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "focus: %v\n", err)
 		return 1
 	}
-	printList(stdout, entries)
+	printList(stdout, entries, detectTermWidth(), *noTruncate)
 	return 0
 }

@@ -60,6 +60,7 @@ func runEpicShow(args []string, stdout, stderr io.Writer) int {
 func runEpicList(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("epic list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	noTruncate := fs.Bool("no-truncate", false, "do not truncate titles to terminal width (for piping/scripting)")
 	if err := fs.Parse(reorderFlags(args)); err != nil {
 		return 2
 	}
@@ -72,7 +73,7 @@ func runEpicList(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "focus: %v\n", err)
 		return 1
 	}
-	printEpicList(stdout, eps)
+	printEpicList(stdout, eps, detectTermWidth(), *noTruncate)
 	return 0
 }
 
