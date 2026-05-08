@@ -14,7 +14,7 @@ import (
 //   - focus epic add <eid> <cid> → set epic: on a card
 func runEpic(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: focus epic <id> | focus epic list | focus epic add <epic-id> <card-id>")
+		fmt.Fprintln(stderr, "usage: focus epic <id> | focus epic list [--no-truncate] | focus epic add <epic-id> <card-id>")
 		return 2
 	}
 

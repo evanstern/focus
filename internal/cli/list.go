@@ -13,7 +13,7 @@ func runList(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "usage: focus list [status] [--project p] [--priority p0|p1|p2|p3] [--epic id] [--owner o] [--tag t] [--type card|epic]")
+		fmt.Fprintln(stderr, "usage: focus list [status] [--project p] [--priority p0|p1|p2|p3] [--epic id] [--owner o] [--tag t] [--type card|epic] [--no-truncate]")
 	}
 
 	project := fs.String("project", "", "filter by project")

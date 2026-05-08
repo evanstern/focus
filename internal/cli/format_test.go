@@ -106,6 +106,18 @@ func TestFormatRowWidth_ZeroWidthFallsBackToLegacy(t *testing.T) {
 	}
 }
 
+func TestFormatRowWidth_NegativeWidthFloorsToMinBudget(t *testing.T) {
+	long := "A very long title that absolutely will not fit anywhere"
+	row := formatRowWidth(makeEntry(1, long), -5, false)
+
+	if !strings.ContainsRune(row, '…') {
+		t.Errorf("negative width must still truncate (not fall back to legacy), got %q", row)
+	}
+	if strings.Contains(row, long) {
+		t.Errorf("negative width should not preserve full title, got %q", row)
+	}
+}
+
 func TestTruncateRunes(t *testing.T) {
 	cases := []struct {
 		name string
@@ -182,5 +194,24 @@ func TestBoardNoTruncateFlag(t *testing.T) {
 	}
 	if !strings.Contains(out, long) {
 		t.Errorf("--no-truncate dropped title: %q", out)
+	}
+}
+
+func TestEpicListNoTruncateFlag(t *testing.T) {
+	root := t.TempDir()
+	if code, _, _ := runIn(t, root, "init"); code != 0 {
+		t.Fatal("init")
+	}
+	long := "An impractically long epic title that will not fit inside an 80 column terminal"
+	if code, _, _ := runIn(t, root, "new", long, "--type", "epic"); code != 0 {
+		t.Fatal("new epic")
+	}
+
+	code, out, _ := runIn(t, root, "epic", "list", "--no-truncate")
+	if code != 0 {
+		t.Fatalf("epic list --no-truncate exit %d", code)
+	}
+	if !strings.Contains(out, long) {
+		t.Errorf("--no-truncate dropped epic title: %q", out)
 	}
 }

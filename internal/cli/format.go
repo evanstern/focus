@@ -111,12 +111,16 @@ func formatRow(e index.Entry) string {
 }
 
 // formatRowWidth renders one row at a target terminal width. If
-// noTruncate is true (or width <= 0), the title is not truncated and
+// noTruncate is true (or width == 0), the title is not truncated and
 // columns may drift on long titles — caller's choice, e.g. for
 // piping. Otherwise the title is truncated to fit the remaining
 // budget after fixed columns, with a single-rune `…` (U+2026)
 // marker. Truncation works on runes, not bytes, so non-ASCII titles
 // (emoji, accents) cut at character boundaries.
+//
+// Negative widths (callers subtracting a prefix from a small detected
+// width) flow into the truncation path and get floored at
+// minTitleBudget — they don't disable truncation.
 //
 // Silent truncation is hostile, but `…` is loud: the user can see
 // the row was clipped and ask for `--no-truncate` if they want the
@@ -127,7 +131,7 @@ func formatRowWidth(e index.Entry, width int, noTruncate bool) string {
 		owner = "-"
 	}
 
-	if noTruncate || width <= 0 {
+	if noTruncate || width == 0 {
 		// Legacy behavior: %-40s pads short titles, never truncates
 		// long ones. Columns drift on long titles. Documented for
 		// scripting / piping use.
@@ -262,14 +266,14 @@ func printEpicList(w io.Writer, eps []board.EpicProgress, termWidth int, noTrunc
 		total := p.Total()
 		progress := fmt.Sprintf("%d/%d done", p.Done, total)
 
-		if noTruncate || termWidth <= 0 {
+		if noTruncate || termWidth == 0 {
 			fmt.Fprintf(w, "#%s  %-40s  %s\n",
 				card.PaddedID(p.Epic.ID), p.Epic.Title, progress)
 			continue
 		}
 
-		// Fixed cost: `#` + id(4) + sep + sep + progress + sep
-		// (trailing newline handled by Fprintln).
+		// Fixed cost in runes: `#` + id(4) + sep + sep + progress.
+		// Trailing newline is appended by the Fprintf format string.
 		fixed := 1 + rowIDWidth + rowSeparator + rowSeparator +
 			utf8.RuneCountInString(progress)
 		budget := termWidth - fixed
